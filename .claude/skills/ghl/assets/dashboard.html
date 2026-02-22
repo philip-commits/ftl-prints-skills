@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FTL Prints — Action Dashboard</title>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --text2: #94a3b8; --accent: #38bdf8;
+    --red: #ef4444; --red-bg: #450a0a; --yellow: #eab308; --yellow-bg: #422006;
+    --green: #22c55e; --green-bg: #052e16; --border: #334155;
+    --purple: #818cf8; --purple-bg: #1e1b4b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6; padding: 24px; max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 4px; }
+  .date { color: var(--text2); font-size: 0.9rem; margin-bottom: 24px; }
+  .stats { display: flex; gap: 12px; margin-bottom: 32px; flex-wrap: wrap; }
+  .stat-pill { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 8px 16px; font-size: 0.85rem; }
+  .stat-pill .num { font-weight: 700; }
+  .stat-pill.high .num { color: var(--red); }
+  .stat-pill.med .num { color: var(--yellow); }
+  .stat-pill.low .num { color: var(--text2); }
+
+  .priority-group { margin-bottom: 28px; }
+  .priority-label { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text2); margin-bottom: 12px; cursor: pointer; user-select: none; }
+  .priority-label.high { color: var(--red); }
+  .priority-label.med { color: var(--yellow); }
+  .priority-label.info { color: var(--purple); }
+
+  .action-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 12px; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+  .card-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+  .badge.reply { background: var(--red-bg); color: var(--red); }
+  .badge.outreach { background: var(--red-bg); color: var(--red); }
+  .badge.followup { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.gather { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.quote-fu { background: var(--yellow-bg); color: var(--yellow); }
+  .badge.final { background: var(--surface2); color: var(--text2); }
+  .badge.move { background: var(--purple-bg); color: var(--purple); }
+  .badge.email { background: #1e3a5f; color: #60a5fa; }
+  .badge.sms { background: #1a3329; color: #34d399; }
+  .badge.call { background: #1a3329; color: #34d399; }
+  .badge.intl { background: var(--purple-bg); color: var(--purple); }
+
+  .contact-name { font-weight: 600; font-size: 1rem; }
+  .contact-detail { color: var(--text2); font-size: 0.85rem; }
+  .context { color: var(--text2); font-size: 0.85rem; margin-bottom: 8px; }
+
+  .preview-toggle { cursor: pointer; color: var(--accent); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
+  .preview-toggle:hover { text-decoration: underline; }
+  .msg-preview { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; margin-top: 8px; display: none; font-size: 0.85rem; }
+  .msg-preview.open { display: block; }
+  .preview-subject { color: var(--accent); font-size: 0.8rem; margin-bottom: 6px; }
+  .preview-body { color: var(--text); }
+
+  .send-btn { padding: 6px 16px; border-radius: 6px; border: none; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; }
+  .send-btn.ready { background: var(--accent); color: #0f172a; }
+  .send-btn.ready:hover { opacity: 0.85; }
+  .send-btn.sent { background: var(--green-bg); color: var(--green); cursor: default; }
+  .send-btn.failed { background: var(--red-bg); color: var(--red); cursor: pointer; }
+  .send-btn.sending { opacity: 0.5; cursor: wait; }
+  .send-btn.move-btn.ready { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple); }
+
+  .section { background: var(--surface); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .section-header { padding: 16px 20px; font-weight: 600; font-size: 0.95rem; cursor: pointer; display: flex;
+    justify-content: space-between; align-items: center; user-select: none; color: var(--text2); }
+  .section-header:hover { background: var(--surface2); }
+  .section-body { padding: 0 20px 16px; display: none; }
+  .section-body.open { display: block; }
+  .no-action-item { padding: 6px 0; font-size: 0.85rem; color: var(--text2); border-bottom: 1px solid var(--border); }
+  .no-action-item:last-child { border-bottom: none; }
+
+  .inactive-bar { display: flex; gap: 24px; padding: 12px 0; }
+  .inactive-stat { text-align: center; }
+  .inactive-stat .num { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+  .inactive-stat .lbl { font-size: 0.75rem; color: var(--text2); }
+
+  .loading { text-align: center; padding: 60px 0; color: var(--text2); font-size: 1.1rem; }
+</style>
+</head>
+<body>
+
+<h1>FTL Prints — Action Dashboard</h1>
+<div class="date" id="date-line"></div>
+
+<div id="loading" class="loading">Loading action data...</div>
+<div id="dashboard" style="display:none;">
+  <div class="stats" id="stats-bar"></div>
+  <div id="action-groups"></div>
+  <div id="no-action-section"></div>
+  <div id="inactive-section"></div>
+</div>
+
+<script>
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function toggleSection(header) {
+  header.nextElementSibling.classList.toggle('open');
+}
+function togglePreview(btn) {
+  const p = btn.nextElementSibling;
+  p.classList.toggle('open');
+  btn.textContent = p.classList.contains('open') ? '\u25be Hide message' : '\u25b8 Edit message';
+}
+function showCallResult(btn) {
+  const card = btn.closest('.action-card');
+  card.querySelector('.call-initial').style.display = 'none';
+  card.querySelector('.call-result').style.display = 'block';
+}
+function showAnswered(btn, id) {
+  const card = btn.closest('.action-card');
+  card.querySelector('.call-result').style.display = 'none';
+  card.querySelector('.call-answered').style.display = 'block';
+}
+function showNoAnswer(btn, id) {
+  const card = btn.closest('.action-card');
+  card.querySelector('.call-result').style.display = 'none';
+  card.querySelector('.call-noanswer').style.display = 'block';
+}
+function textToHtml(text) {
+  return '<p>' + text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+}
+
+async function sendEmail(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const card = btn.closest('.action-card');
+  const subject = card.querySelector('.edit-subject').value;
+  const message = card.querySelector('.edit-body').value;
+  const html = textToHtml(message);
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Sending...';
+  try {
+    const r = await fetch('/api/send/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type:'Email', subject, message, html})});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+async function sendSms(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const card = btn.closest('.action-card') || btn.closest('.call-noanswer');
+  const message = card.querySelector('.edit-sms').value;
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Sending...';
+  try {
+    const r = await fetch('/api/send/' + id + '_sms', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type:'SMS', message})});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+async function sendEmailFromCall(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const card = btn.closest('.call-noanswer');
+  const subject = card.querySelector('.edit-subject').value;
+  const message = card.querySelector('.edit-body').value;
+  const html = textToHtml(message);
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Sending...';
+  try {
+    const r = await fetch('/api/send/' + id + '_email', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({type:'Email', subject, message, html})});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+async function saveNote(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const card = btn.closest('.call-answered');
+  const body = card.querySelector('.edit-note').value;
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/note/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({body})});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Saved \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+async function moveStage(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Moving...';
+  try {
+    const r = await fetch('/api/move/' + id, {method:'POST'});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Moved \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+function buildEmailCard(a) {
+  const badges = [];
+  const actionBadge = a.actionType === 'reply' ? 'reply' : a.actionType === 'outreach' ? 'outreach' : 'followup';
+  badges.push(`<span class="badge ${esc(actionBadge)}">${esc(a.actionType)}</span>`);
+  badges.push('<span class="badge email">EMAIL</span>');
+  if (a.international) badges.push('<span class="badge intl">INTL</span>');
+
+  const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
+  return `<div class="action-card">
+    <div class="card-top">
+      <div class="card-badges">${badges.join('')}</div>
+      <button class="send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)">Send</button>
+    </div>
+    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    <div class="context">${esc(a.context)}</div>
+    <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
+    <div class="msg-preview">
+      <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
+      <textarea class="edit-body" rows="5" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.message || '')}</textarea>
+    </div>
+  </div>`;
+}
+
+function buildCallCard(a) {
+  const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
+  return `<div class="action-card">
+    <div class="card-top">
+      <div class="card-badges">
+        <span class="badge call">CALL</span>
+      </div>
+    </div>
+    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    <div class="context">${esc(a.context)}</div>
+    <div class="call-initial">
+      <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);font-size:0.95rem;margin-right:12px;">${esc(a.contactPhone)}</a>
+      <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
+    </div>
+    <div class="call-result" style="display:none;">
+      <button class="send-btn ready" onclick="showAnswered(this, ${a.id})" style="margin-right:8px;">Answered</button>
+      <button class="send-btn ready" onclick="showNoAnswer(this, ${a.id})">No Answer</button>
+    </div>
+    <div class="call-answered" style="display:none;">
+      <textarea class="edit-note" rows="3" placeholder="Add a note about the call..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+      <button class="send-btn ready" data-action-id="${a.id}" onclick="saveNote(${a.id}, this)">Save Note</button>
+    </div>
+    <div class="call-noanswer" style="display:none;">
+      <div style="margin-bottom:12px;">
+        <div style="font-size:0.8rem;color:var(--text2);margin-bottom:4px;">SMS</div>
+        <textarea class="edit-sms" rows="2" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.noAnswerSms || '')}</textarea>
+        <button class="send-btn ready" data-action-id="${a.id}_sms" onclick="sendSms(${a.id}, this)" style="margin-top:6px;">Send SMS</button>
+      </div>
+      <div>
+        <div style="font-size:0.8rem;color:var(--text2);margin-bottom:4px;">Email</div>
+        <input class="edit-subject" value="${esc(a.noAnswerSubject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
+        <textarea class="edit-body" rows="4" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.noAnswerEmail || '')}</textarea>
+        <button class="send-btn ready" data-action-id="${a.id}_email" onclick="sendEmailFromCall(${a.id}, this)" style="margin-top:6px;">Send Email</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildMoveCard(a) {
+  const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
+  return `<div class="action-card">
+    <div class="card-top">
+      <div class="card-badges">
+        <span class="badge move">MOVE</span>
+      </div>
+      <button class="send-btn move-btn ready" data-action-id="${a.id}" onclick="moveStage(${a.id}, this)">Move to Cooled Off</button>
+    </div>
+    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    <div class="context">${esc(a.context)}</div>
+  </div>`;
+}
+
+function buildActionCard(a) {
+  if (a.actionType === 'call' && a.messageType === 'Call') return buildCallCard(a);
+  if (a.actionType === 'move') return buildMoveCard(a);
+  return buildEmailCard(a);
+}
+
+function renderDashboard(data) {
+  const actions = data.actions || [];
+  const noAction = data.noAction || [];
+  const inactiveSummary = data.inactiveSummary || {};
+
+  // Date line
+  const today = new Date();
+  document.getElementById('date-line').textContent =
+    today.toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'}) +
+    ' \u2014 Fort Lauderdale Screen Printing';
+
+  // Stats
+  const highCount = actions.filter(a => a.priority === 'high').length;
+  const medCount = actions.filter(a => a.priority === 'medium').length;
+  const lowCount = actions.filter(a => a.priority === 'low' || a.priority === 'info').length;
+  document.getElementById('stats-bar').innerHTML =
+    `<div class="stat-pill"><span class="num">${actions.length}</span> Actions</div>` +
+    `<div class="stat-pill high"><span class="num">${highCount}</span> High</div>` +
+    `<div class="stat-pill med"><span class="num">${medCount}</span> Medium</div>` +
+    `<div class="stat-pill low"><span class="num">${lowCount}</span> Low</div>`;
+
+  // Group actions by priority
+  const groups = {high: [], medium: [], low: [], info: []};
+  for (const a of actions) {
+    const p = groups[a.priority] ? a.priority : 'low';
+    groups[p].push(a);
+  }
+
+  let groupsHtml = '';
+  const groupMeta = [
+    {key:'high', label:'HIGH PRIORITY', cls:'high'},
+    {key:'medium', label:'MEDIUM PRIORITY', cls:'med'},
+    {key:'low', label:'LOW PRIORITY', cls:'low'},
+    {key:'info', label:'INFO', cls:'info'},
+  ];
+  for (const g of groupMeta) {
+    if (groups[g.key].length === 0) continue;
+    groupsHtml += `<div class="priority-group">`;
+    groupsHtml += `<div class="priority-label ${g.cls}">\u25bc ${g.label} (${groups[g.key].length})</div>`;
+    for (const a of groups[g.key]) {
+      groupsHtml += buildActionCard(a);
+    }
+    groupsHtml += `</div>`;
+  }
+  document.getElementById('action-groups').innerHTML = groupsHtml;
+
+  // No Action Needed
+  if (noAction.length > 0) {
+    let items = '';
+    for (const n of noAction) {
+      items += `<div class="no-action-item"><strong>${esc(n.contactName)}</strong> (${esc(n.stage)}) \u2014 ${esc(n.reason)}</div>`;
+    }
+    document.getElementById('no-action-section').innerHTML =
+      `<div class="section"><div class="section-header" onclick="toggleSection(this)">No Action Needed <span>${noAction.length} leads on track</span></div><div class="section-body">${items}</div></div>`;
+  }
+
+  // Inactive Summary
+  const inactiveTotal = Object.values(inactiveSummary).reduce((s,v) => s+v, 0);
+  if (inactiveTotal > 0) {
+    let stats = '';
+    for (const [label, count] of Object.entries(inactiveSummary)) {
+      stats += `<div class="inactive-stat"><div class="num">${count}</div><div class="lbl">${esc(label)}</div></div>`;
+    }
+    document.getElementById('inactive-section').innerHTML =
+      `<div class="section"><div class="section-header" onclick="toggleSection(this)">Inactive Summary <span>${inactiveTotal}</span></div><div class="section-body"><div class="inactive-bar">${stats}</div></div></div>`;
+  }
+
+  // Show dashboard, hide loading
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  // Restore sent/moved/noted states
+  fetch('/api/status').then(r => r.json()).then(sent => {
+    for (const [id, info] of Object.entries(sent)) {
+      const btn = document.querySelector('[data-action-id="' + id + '"]');
+      if (btn) {
+        btn.classList.remove('ready');
+        btn.classList.add('sent');
+        if (info.status === 'moved') btn.textContent = 'Moved \u2713';
+        else if (info.status === 'noted') btn.textContent = 'Saved \u2713';
+        else btn.textContent = 'Sent \u2713';
+      }
+    }
+  }).catch(() => {});
+}
+
+// Fetch action data and render
+fetch('/api/actions')
+  .then(r => r.json())
+  .then(data => renderDashboard(data))
+  .catch(e => {
+    document.getElementById('loading').textContent = 'Failed to load action data: ' + e.message;
+  });
+</script>
+</body>
+</html>
