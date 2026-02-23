@@ -82,6 +82,16 @@
   .inactive-stat .num { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
   .inactive-stat .lbl { font-size: 0.75rem; color: var(--text2); }
 
+  .card-actions { display: flex; gap: 8px; align-items: center; }
+  .dismiss-btn { background: none; border: none; color: var(--text2); font-size: 1.2rem; cursor: pointer;
+    padding: 2px 6px; line-height: 1; opacity: 0.4; transition: opacity 0.2s, color 0.2s; }
+  .dismiss-btn:hover { color: var(--red); opacity: 1; }
+  .note-toggle { cursor: pointer; color: var(--text2); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
+  .note-toggle:hover { color: var(--accent); text-decoration: underline; }
+  .note-area { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; margin-top: 8px; }
+  .action-card { transition: opacity 0.3s; }
+
   .loading { text-align: center; padding: 60px 0; color: var(--text2); font-size: 1.1rem; }
 </style>
 </head>
@@ -131,6 +141,57 @@ function showNoAnswer(btn, id) {
 }
 function textToHtml(text) {
   return '<p>' + text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+}
+
+async function dismissAction(id, btn) {
+  const card = btn.closest('.action-card');
+  card.style.opacity = '0';
+  setTimeout(() => {
+    card.style.display = 'none';
+    const group = card.closest('.priority-group');
+    if (group) {
+      const visible = group.querySelectorAll('.action-card');
+      const anyVisible = [...visible].some(c => c.style.display !== 'none');
+      if (!anyVisible) group.style.display = 'none';
+    }
+    updateStats();
+  }, 300);
+  try { await fetch('/api/dismiss/' + id, {method: 'POST'}); } catch(e) {}
+}
+
+function toggleNote(btn) {
+  const area = btn.nextElementSibling;
+  const isHidden = area.style.display === 'none';
+  area.style.display = isHidden ? 'block' : 'none';
+  btn.textContent = isHidden ? '\u2212 Hide note' : '+ Add note';
+}
+
+async function saveCardNote(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const area = btn.closest('.note-area');
+  const body = area.querySelector('.card-note').value;
+  if (!body.trim()) return;
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/note/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({body})});
+    const d = await r.json();
+    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Saved \u2713'; }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+function updateStats() {
+  const allCards = document.querySelectorAll('.action-card');
+  const visible = [...allCards].filter(c => c.style.display !== 'none');
+  const highCount = visible.filter(c => c.dataset.priority === 'high').length;
+  const medCount = visible.filter(c => c.dataset.priority === 'medium').length;
+  const lowCount = visible.filter(c => c.dataset.priority !== 'high' && c.dataset.priority !== 'medium').length;
+  document.getElementById('stats-bar').innerHTML =
+    `<div class="stat-pill"><span class="num">${visible.length}</span> Actions</div>` +
+    `<div class="stat-pill high"><span class="num">${highCount}</span> High</div>` +
+    `<div class="stat-pill med"><span class="num">${medCount}</span> Medium</div>` +
+    `<div class="stat-pill low"><span class="num">${lowCount}</span> Low</div>`;
 }
 
 async function sendEmail(id, btn) {
@@ -206,16 +267,22 @@ async function moveStage(id, btn) {
 
 function buildEmailCard(a) {
   const badges = [];
-  const actionBadge = a.actionType === 'reply' ? 'reply' : a.actionType === 'outreach' ? 'outreach' : 'followup';
-  badges.push(`<span class="badge ${esc(actionBadge)}">${esc(a.actionType)}</span>`);
+  const badgeMap = {reply:'reply', outreach:'outreach', high_value_followup:'outreach', final_attempt_email:'final'};
+  const actionBadge = badgeMap[a.actionType] || 'followup';
+  const displayMap = {follow_up_email:'follow up', final_attempt_email:'final attempt', high_value_followup:'high-value follow up'};
+  const actionLabel = displayMap[a.actionType] || a.actionType;
+  badges.push(`<span class="badge ${esc(actionBadge)}">${esc(actionLabel)}</span>`);
   badges.push('<span class="badge email">EMAIL</span>');
   if (a.international) badges.push('<span class="badge intl">INTL</span>');
 
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
-  return `<div class="action-card">
+  return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges">${badges.join('')}</div>
-      <button class="send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)">Send</button>
+      <div class="card-actions">
+        <button class="send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)">Send</button>
+        <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
+      </div>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
@@ -224,16 +291,22 @@ function buildEmailCard(a) {
       <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
       <textarea class="edit-body" rows="5" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.message || '')}</textarea>
     </div>
+    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+    <div class="note-area" style="display:none;">
+      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+    </div>
   </div>`;
 }
 
 function buildCallCard(a) {
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
-  return `<div class="action-card">
+  return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges">
         <span class="badge call">CALL</span>
       </div>
+      <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
@@ -262,20 +335,33 @@ function buildCallCard(a) {
         <button class="send-btn ready" data-action-id="${a.id}_email" onclick="sendEmailFromCall(${a.id}, this)" style="margin-top:6px;">Send Email</button>
       </div>
     </div>
+    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+    <div class="note-area" style="display:none;">
+      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+    </div>
   </div>`;
 }
 
 function buildMoveCard(a) {
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
-  return `<div class="action-card">
+  return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges">
         <span class="badge move">MOVE</span>
       </div>
-      <button class="send-btn move-btn ready" data-action-id="${a.id}" onclick="moveStage(${a.id}, this)">Move to Cooled Off</button>
+      <div class="card-actions">
+        <button class="send-btn move-btn ready" data-action-id="${a.id}" onclick="moveStage(${a.id}, this)">Move to Cooled Off</button>
+        <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
+      </div>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
+    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+    <div class="note-area" style="display:none;">
+      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+    </div>
   </div>`;
 }
 
@@ -356,10 +442,23 @@ function renderDashboard(data) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
 
-  // Restore sent/moved/noted states
+  // Restore sent/moved/noted/dismissed states
   fetch('/api/status').then(r => r.json()).then(sent => {
     for (const [id, info] of Object.entries(sent)) {
-      const btn = document.querySelector('[data-action-id="' + id + '"]');
+      if (info.status === 'dismissed') {
+        const card = document.querySelector('.action-card[data-action-id="' + id + '"]');
+        if (card) {
+          card.style.display = 'none';
+          const group = card.closest('.priority-group');
+          if (group) {
+            const visible = group.querySelectorAll('.action-card');
+            const anyVisible = [...visible].some(c => c.style.display !== 'none');
+            if (!anyVisible) group.style.display = 'none';
+          }
+        }
+        continue;
+      }
+      const btn = document.querySelector('button[data-action-id="' + id + '"]');
       if (btn) {
         btn.classList.remove('ready');
         btn.classList.add('sent');
@@ -368,6 +467,7 @@ function renderDashboard(data) {
         else btn.textContent = 'Sent \u2713';
       }
     }
+    updateStats();
   }).catch(() => {});
 }
 

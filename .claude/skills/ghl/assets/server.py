@@ -1,5 +1,8 @@
-import http.server, json, os, time, urllib.request, urllib.error
+import http.server, json, os, sys, time, urllib.request, urllib.error
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ghl_auth import get_access_token
 
 PORT = 8787
 ACTIONS_FILE = "/tmp/ftl_actions.json"
@@ -11,11 +14,6 @@ if not Path(ACTIONS_FILE).exists():
     print(f"ERROR: {ACTIONS_FILE} not found. Run /ghl first to generate action data.")
     raise SystemExit(1)
 
-mcp_config = json.loads(Path("~/.claude/mcp.json").expanduser().read_text())
-ghl_env = mcp_config["mcpServers"]["ghl"]["env"]
-GHL_AUTH = ghl_env["GHL_AUTH"]
-if not GHL_AUTH.lower().startswith("bearer "):
-    GHL_AUTH = f"Bearer {GHL_AUTH}"
 GHL_BASE = "https://services.leadconnectorhq.com"
 
 data = json.loads(Path(ACTIONS_FILE).read_text())
@@ -64,7 +62,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 req = urllib.request.Request(
                     f"{GHL_BASE}/conversations/messages",
                     data=json.dumps(body).encode(),
-                    headers={"Authorization": GHL_AUTH, "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
+                    headers={"Authorization": get_access_token(), "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
                     method="POST")
                 with urllib.request.urlopen(req) as resp:
                     result = json.loads(resp.read())
@@ -87,7 +85,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 req = urllib.request.Request(
                     f"{GHL_BASE}/contacts/{action['contactId']}/notes",
                     data=json.dumps({"body": note_body}).encode(),
-                    headers={"Authorization": GHL_AUTH, "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
+                    headers={"Authorization": get_access_token(), "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
                     method="POST")
                 with urllib.request.urlopen(req) as resp:
                     json.loads(resp.read())
@@ -99,6 +97,12 @@ class H(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._json(500, {"success": False, "error": str(e)})
 
+        elif self.path.startswith("/api/dismiss/"):
+            aid = self.path.split("/")[-1]
+            sent[str(aid)] = {"status": "dismissed", "ts": time.time()}
+            Path(SENT_FILE).write_text(json.dumps(sent))
+            self._json(200, {"success": True})
+
         elif self.path.startswith("/api/move/"):
             aid = int(self.path.split("/")[-1])
             action = next((a for a in actions if a["id"] == aid), None)
@@ -109,7 +113,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 req = urllib.request.Request(
                     f"{GHL_BASE}/opportunities/{action['opportunityId']}",
                     data=json.dumps(body).encode(),
-                    headers={"Authorization": GHL_AUTH, "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
+                    headers={"Authorization": get_access_token(), "Version": "2021-07-28", "Content-Type": "application/json", "User-Agent": "FTL-Prints-Pipeline/1.0"},
                     method="PUT")
                 with urllib.request.urlopen(req) as resp:
                     json.loads(resp.read())
