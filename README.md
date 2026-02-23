@@ -8,11 +8,28 @@ Claude Code skills for Fort Lauderdale Screen Printing operations.
 
 Download and install from [code.claude.com](https://code.claude.com).
 
-### 2. Set Up the GHL MCP Server
+### 2. Set Up GHL Authentication (OAuth2 — Recommended)
 
-Add the GoHighLevel MCP server to your global config at `~/.claude/mcp.json`. If the file doesn't exist, create it.
+OAuth2 tokens auto-refresh every 24 hours. After one-time setup, no manual token rotation is needed.
 
-Add this entry inside the `"mcpServers"` object:
+**Prerequisites:**
+1. Register a GHL Marketplace app at https://marketplace.gohighlevel.com
+2. Set redirect URI to `http://localhost:9876/callback`
+3. Enable scopes: conversations, opportunities, contacts (read+write)
+
+**Run the setup:**
+
+```bash
+python3 .claude/skills/ghl/assets/ghl_oauth_setup.py <client_id> <client_secret>
+```
+
+Click "Allow" in the browser window that opens. Tokens are saved to `~/.config/ftl-prints/ghl_tokens.json` and auto-refresh forever.
+
+### 2b. GHL MCP Server (Optional — Best-Effort)
+
+The MCP server provides Claude Code tool access to GHL. It uses a PIT token which requires manual rotation. The system falls back to direct API calls with OAuth2 when MCP returns 401.
+
+Add to `~/.claude/mcp.json`:
 
 ```json
 {

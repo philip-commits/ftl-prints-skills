@@ -4,19 +4,22 @@ Fetch conversation metadata for active pipeline leads via GHL REST API.
 
 Reads:
   /tmp/ftl_pipeline.json   — Phase 1 parsed pipeline data
-  ~/.claude/mcp.json       — GHL auth token
 
 Writes:
   /tmp/ftl_convos.json     — Conversation metadata keyed by contactId
 """
 
 import json
+import os
 import sys
 import time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ghl_auth import get_access_token
 
 PIPELINE_FILE = "/tmp/ftl_pipeline.json"
 OUTPUT_FILE = "/tmp/ftl_convos.json"
@@ -25,18 +28,37 @@ GHL_BASE = "https://services.leadconnectorhq.com"
 MAX_WORKERS = 3
 
 
-def load_auth():
-    """Load GHL auth token from mcp.json (same pattern as server.py)."""
-    mcp_config = json.loads(Path("~/.claude/mcp.json").expanduser().read_text())
-    ghl_env = mcp_config["mcpServers"]["ghl"]["env"]
-    token = ghl_env["GHL_AUTH"]
-    if not token.lower().startswith("bearer "):
-        token = f"Bearer {token}"
-    return token
+
+def fetch_outbound_count(conversation_id, auth):
+    """Fetch messages for a conversation and count outbound ones."""
+    url = f"{GHL_BASE}/conversations/{conversation_id}/messages?limit=100"
+    req = urllib.request.Request(url, headers={
+        "Authorization": auth,
+        "Version": "2021-07-28",
+        "Accept": "application/json",
+        "User-Agent": "FTL-Prints-Pipeline/1.0",
+    })
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read())
+            messages = body.get("messages", body.get("data", []))
+            count = sum(1 for m in messages if m.get("direction") == "outbound")
+            return count
+        except urllib.error.HTTPError as e:
+            if e.code in (500, 503) and attempt == 0:
+                time.sleep(2)
+                continue
+            return None
+        except Exception:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            return None
 
 
 def fetch_conversation(contact_id, auth):
-    """Fetch conversation metadata for a single contact. Returns (contactId, data|None)."""
+    """Fetch conversation metadata + outbound count for a single contact. Returns (contactId, data|None)."""
     url = (f"{GHL_BASE}/conversations/search"
            f"?contactId={contact_id}&locationId={LOCATION_ID}")
     req = urllib.request.Request(url, headers={
@@ -54,6 +76,11 @@ def fetch_conversation(contact_id, auth):
             if not conversations:
                 return (contact_id, None)
             convo = conversations[0]
+            convo_id = convo.get("id")
+
+            # Fetch outbound message count
+            outbound_count = fetch_outbound_count(convo_id, auth) if convo_id else None
+
             return (contact_id, {
                 "unreadCount": convo.get("unreadCount", 0),
                 "lastMessageDirection": convo.get("lastMessageDirection"),
@@ -61,15 +88,15 @@ def fetch_conversation(contact_id, auth):
                 "lastMessageType": convo.get("lastMessageType"),
                 "lastOutboundMessageAction": convo.get("lastOutboundMessageAction"),
                 "lastManualMessageDate": convo.get("lastManualMessageDate"),
-                "conversationId": convo.get("id"),
+                "conversationId": convo_id,
+                "outboundCount": outbound_count,
             })
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 print("ERROR: 401 Unauthorized from GHL API.", file=sys.stderr)
-                print("The PIT token has expired. Ask Philip to:", file=sys.stderr)
-                print("  1. Go to GHL Settings > Private Integrations", file=sys.stderr)
-                print("  2. Generate a new PIT token", file=sys.stderr)
-                print("  3. Update ~/.claude/mcp.json with the new token", file=sys.stderr)
+                print("Token expired or invalid. To fix:", file=sys.stderr)
+                print("  python3 .claude/skills/ghl/assets/ghl_oauth_setup.py <client_id> <client_secret>", file=sys.stderr)
+                print("Or update the PIT token in ~/.claude/mcp.json", file=sys.stderr)
                 sys.exit(1)
             if e.code in (500, 503) and attempt == 0:
                 time.sleep(2)
@@ -99,7 +126,7 @@ def main():
     print(f"Fetching conversations for {len(contact_ids)} active leads...")
 
     # Load auth once (read-only, shared across threads)
-    auth = load_auth()
+    auth = get_access_token()
 
     # Fetch concurrently with max 3 workers (respects GHL rate limit)
     results = {}

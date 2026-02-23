@@ -11,14 +11,41 @@ Daily operational briefing for Philip Munroe, founder of Fort Lauderdale Screen 
 
 ## Critical Technical Notes
 
-1. **Use GHL MCP tools directly** — call `mcp__ghl__*` tools as direct tool calls. Do NOT check config files or assume tools aren't available. Just call them.
+1. **Use GHL MCP tools with curl fallback** — First try `mcp__ghl__opportunities_search-opportunity` directly. If it returns a **401 error**, the MCP remote proxy has an auth issue. Fall back to direct curl using the auto-refreshing token from `ghl_auth.py`:
+   ```bash
+   GHL_TOKEN=$(python3 -c "import sys; sys.path.insert(0, '.claude/skills/ghl/assets'); from ghl_auth import get_access_token; print(get_access_token())")
+   curl -s 'https://services.leadconnectorhq.com/opportunities/search?pipeline_id=GeLwykvW1Fup6Z5oiKir&location_id=iCyLg9rh8NtPpTfFCcGk&limit=100' \
+     -H "Authorization: $GHL_TOKEN" \
+     -H 'Version: 2021-07-28' \
+     -H 'User-Agent: FTL-Prints-Pipeline/1.0'
+   ```
+   This uses the OAuth2 token (auto-refreshed if expired) with PIT fallback. Save the JSON response to `/tmp/ftl_raw_opps.json` and parse with the Phase 1 python script (adjust to read `data` → `opportunities` directly since the curl response is raw JSON, not wrapped in a temp file array).
+
+   Similarly, for **sending messages** when MCP tools fail with 401, use curl:
+   ```bash
+   GHL_TOKEN=$(python3 -c "import sys; sys.path.insert(0, '.claude/skills/ghl/assets'); from ghl_auth import get_access_token; print(get_access_token())")
+   # Send Email
+   curl -s -X POST 'https://services.leadconnectorhq.com/conversations/messages' \
+     -H "Authorization: $GHL_TOKEN" \
+     -H 'Version: 2021-07-28' \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"Email","contactId":"...","subject":"...","html":"...","emailFrom":"philip@ftlprints.com"}'
+
+   # Send SMS
+   curl -s -X POST 'https://services.leadconnectorhq.com/conversations/messages' \
+     -H "Authorization: $GHL_TOKEN" \
+     -H 'Version: 2021-07-28' \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"SMS","contactId":"...","message":"..."}'
+   ```
 
 2. **Pagination** — The GHL search opportunity API returns 20 results by default. ALWAYS pass `query_limit: 100` to get all opportunities. Do not assume the first page is complete.
 
-3. **GHL REST API for tasks** — The GHL MCP does not expose task create/update/delete tools. For these operations, use `curl` via Bash with the PIT token from the environment:
+3. **GHL REST API for tasks** — The GHL MCP does not expose task create/update/delete tools. For these operations, use `curl` via Bash with the auto-refreshing token:
    ```bash
+   GHL_TOKEN=$(python3 -c "import sys; sys.path.insert(0, '.claude/skills/ghl/assets'); from ghl_auth import get_access_token; print(get_access_token())")
    curl -s -X POST 'https://services.leadconnectorhq.com/contacts/{contactId}/tasks' \
-     -H 'Authorization: Bearer <PIT_TOKEN>' \
+     -H "Authorization: $GHL_TOKEN" \
      -H 'Version: 2021-07-28' \
      -H 'Content-Type: application/json' \
      -d '{"title":"...","dueDate":"...","body":"...","completed":false}'
@@ -39,7 +66,7 @@ Daily operational briefing for Philip Munroe, founder of Fort Lauderdale Screen 
    → access .data.opportunities (array of opportunity objects)
    ```
 
-8. **Static assets** — `server.py`, `dashboard.html`, `fetch_convos.py`, and `enrich.py` live in `.claude/skills/ghl/assets/`. Do NOT regenerate or overwrite them.
+8. **Static assets** — `server.py`, `dashboard.html`, `fetch_convos.py`, `enrich.py`, `ghl_auth.py`, and `ghl_oauth_setup.py` live in `.claude/skills/ghl/assets/`. Do NOT regenerate or overwrite them.
 
 9. **Enrichment script** — `assets/enrich.py` computes `suggestedAction` and derived fields (`isInternational`, `missingInfo`, `needsReply`, etc.). Use its output as the starting point for Phase 3 — override only when conversation context warrants it.
 
@@ -100,6 +127,8 @@ Do NOT look for `fieldValue` or `value` — those keys don't exist.
 
 ### Phase 1: Fetch All Pipeline Data
 
+**Step 1a: Try MCP first, fall back to curl on 401.**
+
 ```
 Tool: mcp__ghl__opportunities_search-opportunity
 Params:
@@ -107,7 +136,22 @@ Params:
   - query_limit: 100
 ```
 
-The response will likely be too large for inline display and will be saved to a temp file. Once you have the result (either inline or from a temp file), run this python3 script via Bash to parse it:
+If MCP returns **401**, fall back to curl:
+```bash
+GHL_TOKEN=$(python3 -c "import sys; sys.path.insert(0, '.claude/skills/ghl/assets'); from ghl_auth import get_access_token; print(get_access_token())")
+curl -s "https://services.leadconnectorhq.com/opportunities/search?pipeline_id=GeLwykvW1Fup6Z5oiKir&location_id=iCyLg9rh8NtPpTfFCcGk&limit=100" \
+  -H "Authorization: $GHL_TOKEN" \
+  -H 'Version: 2021-07-28' \
+  -H 'User-Agent: FTL-Prints-Pipeline/1.0' | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+with open('/tmp/ftl_raw_opps.json', 'w') as f:
+    json.dump(data, f)
+print(f'Fetched {len(data.get(\"opportunities\", []))} opportunities via curl fallback')
+"
+```
+
+**Step 1b: Parse the data.** The MCP response will be saved to a temp file (wrapped in a `[{"type":"text","text":"..."}]` array). The curl fallback saves raw JSON to `/tmp/ftl_raw_opps.json`. The parsing script handles both formats:
 
 ```bash
 python3 << 'PYEOF'
@@ -135,17 +179,24 @@ for d in search_dirs:
             if temp_file is None or os.path.getmtime(candidate) > os.path.getmtime(temp_file):
                 temp_file = candidate
 
-if temp_file and os.path.exists(temp_file):
+# First check for curl fallback file (raw JSON from direct API call)
+curl_file = "/tmp/ftl_raw_opps.json"
+if os.path.exists(curl_file) and (temp_file is None or os.path.getmtime(curl_file) > os.path.getmtime(temp_file)):
+    with open(curl_file) as fh:
+        inner = json.load(fh)
+    print(f"Loaded data from curl fallback: {curl_file}")
+elif temp_file and os.path.exists(temp_file):
     with open(temp_file) as fh:
         raw = json.load(fh)
     # Temp file structure: [{"type":"text","text":"{...}"}]
     inner = json.loads(raw[0]["text"])
-    print(f"Loaded data from: {temp_file}")
+    print(f"Loaded data from MCP temp file: {temp_file}")
 else:
-    print("ERROR: No temp file found. Check tool result for inline data.", file=sys.stderr)
+    print("ERROR: No data file found. Check tool result for inline data.", file=sys.stderr)
     sys.exit(1)
 
-opportunities = inner.get("data", {}).get("opportunities", [])
+# Handle both formats: curl returns {opportunities:[...]}, MCP returns {data:{opportunities:[...]}}
+opportunities = inner.get("opportunities") or inner.get("data", {}).get("opportunities", [])
 print(f"Total opportunities: {len(opportunities)}")
 
 # --- Stage definitions ---
@@ -265,7 +316,7 @@ python3 .claude/skills/ghl/assets/fetch_convos.py
 
 This script reads `/tmp/ftl_pipeline.json`, fetches conversation metadata for each active lead via the GHL REST API (max 3 concurrent, with retry), and writes `/tmp/ftl_convos.json`.
 
-**On 401 error:** The script prints instructions to regenerate the PIT token. Stop the report and relay this to Philip.
+**On 401 error:** The script prints instructions to run `ghl_oauth_setup.py` or update the PIT token. Stop the report and relay this to Philip.
 
 **On other failures:** Proceed to Phase 2.5 anyway — the enrichment script gracefully degrades without conversation data.
 
@@ -487,8 +538,9 @@ These still require Claude Code interaction after the dashboard opens:
 #### Create Task (via REST API)
 
 ```bash
+GHL_TOKEN=$(python3 -c "import sys; sys.path.insert(0, '.claude/skills/ghl/assets'); from ghl_auth import get_access_token; print(get_access_token())")
 curl -s -X POST 'https://services.leadconnectorhq.com/contacts/{contactId}/tasks' \
-  -H 'Authorization: Bearer {PIT_TOKEN}' \
+  -H "Authorization: $GHL_TOKEN" \
   -H 'Version: 2021-07-28' \
   -H 'Content-Type: application/json' \
   -d '{"title":"...","dueDate":"...","body":"...","completed":false}'
@@ -581,7 +633,7 @@ When drafting emails/texts for Philip:
 
 ## Error Handling
 
-- **401 from GHL:** Token expired. Tell Philip to generate a new PIT in GHL Settings > Private Integrations and update his `mcp.json`.
+- **401 from GHL:** Token expired. If OAuth is set up, run `python3 .claude/skills/ghl/assets/ghl_oauth_setup.py <client_id> <client_secret>` to re-authorize. Otherwise, generate a new PIT in GHL Settings > Private Integrations and update `mcp.json`.
 - **No conversation found:** Skip conversation fetch, note "No conversation history" in the report.
 - **Fewer results than expected:** Note the count and mention pagination may be needed.
 - **Tool call failure:** Report the error clearly and continue with the rest of the report. Don't halt the entire report for one failed call.
@@ -592,5 +644,5 @@ When drafting emails/texts for Philip:
 - **Port 8787 in use:** Kill the existing process (`lsof -ti:8787 | xargs kill`) and retry.
 - **Server won't start:** Fall back to a terminal-based action list. Print numbered actions and let Philip say "send 1,3,5" to trigger sends via MCP tool calls directly.
 - **GHL API error on send:** The server returns error JSON to the browser. The button shows "Failed — retry" with the error message in a tooltip. Philip can click to retry.
-- **Token expired during send:** Server returns 401. The HTML should show "Auth expired — regenerate PIT token in GHL Settings > Private Integrations" in place of the button.
+- **Token expired during send:** Server returns 401. OAuth tokens auto-refresh, so this likely means the refresh token expired. Run `ghl_oauth_setup.py` to re-authorize, or update the PIT token in `mcp.json`.
 - **Static assets** — `server.py`, `dashboard.html`, `fetch_convos.py`, and `enrich.py` live in `.claude/skills/ghl/assets/`. Do NOT regenerate or overwrite them. The dashboard fetches data dynamically from `/api/actions`.
