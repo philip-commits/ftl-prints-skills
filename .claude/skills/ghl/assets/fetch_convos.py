@@ -29,8 +29,38 @@ MAX_WORKERS = 3
 
 
 
+def fetch_notes(contact_id, auth):
+    """Fetch the last 5 notes for a contact, sorted by dateAdded descending."""
+    url = f"{GHL_BASE}/contacts/{contact_id}/notes"
+    req = urllib.request.Request(url, headers={
+        "Authorization": auth,
+        "Version": "2021-07-28",
+        "Accept": "application/json",
+        "User-Agent": "FTL-Prints-Pipeline/1.0",
+    })
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read())
+            notes_raw = body.get("notes", [])
+            # Sort by dateAdded descending, take last 5
+            notes_raw.sort(key=lambda n: n.get("dateAdded", ""), reverse=True)
+            return [{"body": n.get("body", ""), "dateAdded": n.get("dateAdded", "")}
+                    for n in notes_raw[:5]]
+        except urllib.error.HTTPError as e:
+            if e.code in (500, 503) and attempt == 0:
+                time.sleep(2)
+                continue
+            return []
+        except Exception:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            return []
+
+
 def fetch_outbound_count(conversation_id, auth):
-    """Fetch messages for a conversation and count outbound ones."""
+    """Fetch messages for a conversation, count outbound ones, and track per-channel timestamps."""
     url = f"{GHL_BASE}/conversations/{conversation_id}/messages?limit=100"
     req = urllib.request.Request(url, headers={
         "Authorization": auth,
@@ -42,22 +72,59 @@ def fetch_outbound_count(conversation_id, auth):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read())
-            messages = body.get("messages", body.get("data", []))
-            count = sum(1 for m in messages if m.get("direction") == "outbound")
-            return count
+            # Messages may be nested: body["messages"]["messages"] or flat
+            raw = body.get("messages", body.get("data", []))
+            if isinstance(raw, dict):
+                messages = raw.get("messages", [])
+            else:
+                messages = raw
+
+            # Direction lives at top level for SMS/CALL, but in meta.email.direction for EMAIL
+            def get_direction(m):
+                d = m.get("direction")
+                if d:
+                    return d
+                meta = m.get("meta")
+                if isinstance(meta, dict):
+                    for v in meta.values():
+                        if isinstance(v, dict) and "direction" in v:
+                            return v["direction"]
+                return None
+
+            count = sum(1 for m in messages if get_direction(m) == "outbound")
+
+            # Track most recent outbound timestamp per channel (direct only, not campaign)
+            channel_map = {
+                "TYPE_CALL": "lastOutboundCallDate",
+                "TYPE_SMS": "lastOutboundSmsDate",
+                "TYPE_EMAIL": "lastOutboundEmailDate",
+            }
+            channel_dates = {v: None for v in channel_map.values()}
+            for m in messages:
+                if get_direction(m) != "outbound":
+                    continue
+                msg_type = m.get("messageType", "")
+                if msg_type not in channel_map:
+                    continue
+                ts = m.get("dateAdded") or m.get("createdAt")
+                if ts and (channel_dates[channel_map[msg_type]] is None
+                           or ts > channel_dates[channel_map[msg_type]]):
+                    channel_dates[channel_map[msg_type]] = ts
+
+            return count, channel_dates
         except urllib.error.HTTPError as e:
             if e.code in (500, 503) and attempt == 0:
                 time.sleep(2)
                 continue
-            return None
+            return None, {}
         except Exception:
             if attempt == 0:
                 time.sleep(2)
                 continue
-            return None
+            return None, {}
 
 
-def fetch_conversation(contact_id, auth):
+def fetch_conversation(contact_id, auth, stage=""):
     """Fetch conversation metadata + outbound count for a single contact. Returns (contactId, data|None)."""
     url = (f"{GHL_BASE}/conversations/search"
            f"?contactId={contact_id}&locationId={LOCATION_ID}")
@@ -74,14 +141,24 @@ def fetch_conversation(contact_id, auth):
                 body = json.loads(resp.read())
             conversations = body.get("conversations", [])
             if not conversations:
+                if stage != "New Lead":
+                    notes = fetch_notes(contact_id, auth)
+                    if notes:
+                        return (contact_id, {"notes": notes})
                 return (contact_id, None)
             convo = conversations[0]
             convo_id = convo.get("id")
 
-            # Fetch outbound message count
-            outbound_count = fetch_outbound_count(convo_id, auth) if convo_id else None
+            # Fetch outbound message count + per-channel timestamps
+            if convo_id:
+                outbound_count, channel_dates = fetch_outbound_count(convo_id, auth)
+            else:
+                outbound_count, channel_dates = None, {}
 
-            return (contact_id, {
+            # Fetch contact notes (skip for New Leads — they won't have any)
+            notes = fetch_notes(contact_id, auth) if stage != "New Lead" else []
+
+            result = {
                 "unreadCount": convo.get("unreadCount", 0),
                 "lastMessageDirection": convo.get("lastMessageDirection"),
                 "lastMessageDate": convo.get("lastMessageDate"),
@@ -90,7 +167,10 @@ def fetch_conversation(contact_id, auth):
                 "lastManualMessageDate": convo.get("lastManualMessageDate"),
                 "conversationId": convo_id,
                 "outboundCount": outbound_count,
-            })
+                "notes": notes,
+            }
+            result.update(channel_dates)
+            return (contact_id, result)
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 print("ERROR: 401 Unauthorized from GHL API.", file=sys.stderr)
@@ -122,8 +202,9 @@ def main():
         sys.exit(1)
 
     active = pipeline.get("active", [])
-    contact_ids = [lead["contactId"] for lead in active if lead.get("contactId")]
-    print(f"Fetching conversations for {len(contact_ids)} active leads...")
+    leads = [(lead["contactId"], lead.get("stage", ""))
+             for lead in active if lead.get("contactId")]
+    print(f"Fetching conversations for {len(leads)} active leads...")
 
     # Load auth once (read-only, shared across threads)
     auth = get_access_token()
@@ -131,8 +212,8 @@ def main():
     # Fetch concurrently with max 3 workers (respects GHL rate limit)
     results = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(fetch_conversation, cid, auth): cid
-                   for cid in contact_ids}
+        futures = {pool.submit(fetch_conversation, cid, auth, stage): cid
+                   for cid, stage in leads}
         for future in as_completed(futures):
             contact_id, data = future.result()
             results[contact_id] = data
@@ -144,8 +225,10 @@ def main():
     found = sum(1 for v in results.values() if v is not None)
     unread = sum(1 for v in results.values()
                  if v and (v.get("unreadCount") or 0) > 0)
-    print(f"Done. {found}/{len(contact_ids)} contacts have conversations "
-          f"({unread} with unread messages).")
+    with_notes = sum(1 for v in results.values()
+                     if v and len(v.get("notes") or []) > 0)
+    print(f"Done. {found}/{len(leads)} contacts have conversations "
+          f"({unread} with unread messages, {with_notes} with notes).")
     print(f"Output written to {OUTPUT_FILE}")
 
 

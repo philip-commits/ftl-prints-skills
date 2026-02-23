@@ -55,6 +55,7 @@ class H(http.server.BaseHTTPRequestHandler):
                     "subject": req_body.get("subject", action.get("subject", "")),
                     "html": req_body.get("html", ""),
                     "message": req_body.get("message", action.get("message", "")),
+                    "emailFrom": "sales@ftlprints.com",
                 })
             else:
                 body["message"] = req_body.get("message", action.get("message", ""))

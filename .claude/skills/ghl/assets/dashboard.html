@@ -92,6 +92,15 @@
     padding: 12px 16px; margin-top: 8px; }
   .action-card { transition: opacity 0.3s; }
 
+  .prior-notes-toggle { cursor: pointer; color: var(--text2); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
+  .prior-notes-toggle:hover { color: var(--accent); text-decoration: underline; }
+  .prior-notes-list { margin-top: 6px; display: none; }
+  .prior-notes-list.open { display: block; }
+  .prior-note { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; margin-bottom: 6px; font-size: 0.8rem; }
+  .prior-note .note-date { color: var(--text2); font-size: 0.7rem; margin-bottom: 2px; }
+  .prior-note .note-body { color: var(--text); }
+
   .loading { text-align: center; padding: 60px 0; color: var(--text2); font-size: 1.1rem; }
 </style>
 </head>
@@ -164,6 +173,25 @@ function toggleNote(btn) {
   const isHidden = area.style.display === 'none';
   area.style.display = isHidden ? 'block' : 'none';
   btn.textContent = isHidden ? '\u2212 Hide note' : '+ Add note';
+}
+
+function togglePriorNotes(btn) {
+  const list = btn.nextElementSibling;
+  list.classList.toggle('open');
+  const count = list.querySelectorAll('.prior-note').length;
+  btn.textContent = list.classList.contains('open')
+    ? `\u25be Hide prior notes (${count})`
+    : `\u25b8 Prior notes (${count})`;
+}
+
+function buildNotesHtml(notes) {
+  if (!notes || notes.length === 0) return '';
+  let items = '';
+  for (const n of notes) {
+    const d = n.dateAdded ? new Date(n.dateAdded).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+    items += `<div class="prior-note"><div class="note-date">${esc(d)}</div><div class="note-body">${esc(n.body)}</div></div>`;
+  }
+  return `<button class="prior-notes-toggle" onclick="togglePriorNotes(this)">\u25b8 Prior notes (${notes.length})</button><div class="prior-notes-list">${items}</div>`;
 }
 
 async function saveCardNote(id, btn) {
@@ -286,6 +314,7 @@ function buildEmailCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
+    ${buildNotesHtml(a.notes)}
     <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
     <div class="msg-preview">
       <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
@@ -310,6 +339,7 @@ function buildCallCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
+    ${buildNotesHtml(a.notes)}
     <div class="call-initial">
       <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);font-size:0.95rem;margin-right:12px;">${esc(a.contactPhone)}</a>
       <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
@@ -357,6 +387,7 @@ function buildMoveCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
     <div class="context">${esc(a.context)}</div>
+    ${buildNotesHtml(a.notes)}
     <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
     <div class="note-area" style="display:none;">
       <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>

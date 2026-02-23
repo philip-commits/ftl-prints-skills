@@ -50,6 +50,14 @@ NON_NANP_INTL_PREFIXES = ("+41", "+44")
 # --- Custom field keys that matter for quoting ---
 INFO_FIELDS = ["artwork", "sizes", "quantity", "project_details"]
 
+# --- Cooldown thresholds (business days) ---
+COOLDOWN_MULTI_CHANNEL = 3  # after call + email/SMS on same day ("full press")
+COOLDOWN_CALL = 3           # before recommending another call
+COOLDOWN_EMAIL = 2          # before recommending another email
+
+# Actions that bypass cooldown entirely
+COOLDOWN_BYPASS_ACTIONS = {"reply", "outreach", "move"}
+
 PIPELINE_FILE = "/tmp/ftl_pipeline.json"
 CONVOS_FILE = "/tmp/ftl_convos.json"
 OUTPUT_FILE = "/tmp/ftl_enriched.json"
@@ -143,6 +151,18 @@ def check_waiting_on_artwork(lead):
     return "will provide" in details or "new logo" in details
 
 
+def parse_timestamp(ts):
+    """Parse a GHL timestamp (ISO string or epoch millis) into a datetime. Returns None on failure."""
+    if ts is None:
+        return None
+    try:
+        if isinstance(ts, (int, float)):
+            return datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError, OSError):
+        return None
+
+
 def enrich_from_opportunity(lead):
     """Compute fields derived from opportunity data only."""
     phone = lead.get("phone", "")
@@ -165,33 +185,49 @@ def enrich_from_conversation(lead, convo):
             "needsReply": False,
             "hasManualOutreach": False,
             "daysSinceLastContact": None,
+            "daysSinceLastCall": None,
+            "daysSinceLastSms": None,
+            "daysSinceLastEmail": None,
             "outboundCount": 0,
             "noConversation": True,
             "conversationId": None,
+            "notes": [],
         }
 
     now = datetime.now(timezone.utc)
     days_since = None
     last_date = convo.get("lastMessageDate") or convo.get("lastManualMessageDate")
     if last_date:
-        try:
-            if isinstance(last_date, (int, float)):
-                # Epoch timestamp in milliseconds
-                dt = datetime.fromtimestamp(last_date / 1000, tz=timezone.utc)
-            else:
-                dt = datetime.fromisoformat(last_date.replace("Z", "+00:00"))
+        dt = parse_timestamp(last_date)
+        if dt:
             days_since = business_days_since(dt, now)
-        except (ValueError, TypeError, OSError):
-            pass
+
+    # Per-channel business days since last outbound
+    days_call = days_sms = days_email = None
+    for field, attr in [("lastOutboundCallDate", "days_call"),
+                        ("lastOutboundSmsDate", "days_sms"),
+                        ("lastOutboundEmailDate", "days_email")]:
+        dt = parse_timestamp(convo.get(field))
+        if dt:
+            if attr == "days_call":
+                days_call = business_days_since(dt, now)
+            elif attr == "days_sms":
+                days_sms = business_days_since(dt, now)
+            else:
+                days_email = business_days_since(dt, now)
 
     return {
         "needsReply": (convo.get("unreadCount", 0) or 0) > 0
             and convo.get("lastMessageDirection") == "inbound",
         "hasManualOutreach": convo.get("lastOutboundMessageAction") == "manual",
         "daysSinceLastContact": days_since,
+        "daysSinceLastCall": days_call,
+        "daysSinceLastSms": days_sms,
+        "daysSinceLastEmail": days_email,
         "outboundCount": convo.get("outboundCount") or 0,
         "noConversation": False,
         "conversationId": convo.get("conversationId"),
+        "notes": convo.get("notes", []),
     }
 
 
@@ -242,11 +278,14 @@ def decide_action(lead):
         label = "New lead" if stage == "New Lead" else "No manual outreach yet"
         return ("outreach", "high", f"{label} — send personalized welcome")
 
-    # 3. "Needs Attention" stage — Philip flagged manually, always high
+    # 3. "Needs Attention" stage — Philip flagged manually, high priority
+    #    but still respect outreach history and cooldowns (don't spam)
     if stage == "Needs Attention":
+        if bdays >= t["move"] and outbound_count >= min_attempts:
+            return ("move", "high", f"Needs Attention but {bdays} bdays, {outbound_count} attempts — consider Cooled Off")
         if is_intl:
             return ("follow_up_email", "high", "Flagged for attention — international, email only")
-        return ("call", "high", "Flagged for attention — call or email immediately")
+        return ("call", "high", "Flagged for attention — call or email")
 
     # 4. Quote Sent — money on the table, own escalation ladder
     if stage == "Quote Sent":
@@ -292,6 +331,56 @@ def decide_action(lead):
     return ("none", "none", "Contacted recently, waiting for response")
 
 
+def apply_cooldown(lead, action, priority, hint):
+    """
+    Post-process decide_action() result — suppress or downgrade if recent
+    multi-channel or per-channel outreach triggers a cooldown.
+
+    Returns (action, priority, hint) — possibly modified.
+    """
+    stage = lead.get("stage", "")
+
+    # Bypass: these actions should never be suppressed
+    if action in COOLDOWN_BYPASS_ACTIONS:
+        return action, priority, hint
+
+    days_call = lead.get("daysSinceLastCall")
+    days_sms = lead.get("daysSinceLastSms")
+    days_email = lead.get("daysSinceLastEmail")
+
+    # 1. Multi-channel "full press" detection:
+    #    call + (email or SMS) both happened within 1 bday of each other
+    if days_call is not None and (days_sms is not None or days_email is not None):
+        other = min(d for d in (days_sms, days_email) if d is not None)
+        # Both happened recently AND within 1 bday of each other
+        if abs(days_call - other) <= 1:
+            most_recent = min(days_call, other)
+            if most_recent < COOLDOWN_MULTI_CHANNEL:
+                return ("none", "none",
+                        f"Cooldown: full press {most_recent} bday(s) ago, "
+                        f"wait {COOLDOWN_MULTI_CHANNEL - most_recent} more bday(s)")
+
+    # 2. Call cooldown: called recently → downgrade to email or suppress
+    is_call_action = action in ("call", "high_value_followup")
+    if is_call_action and days_call is not None and days_call < COOLDOWN_CALL:
+        # Try downgrading to email if email cooldown allows
+        if days_email is None or days_email >= COOLDOWN_EMAIL:
+            return ("follow_up_email", priority,
+                    f"Cooldown: called {days_call} bday(s) ago — email instead")
+        return ("none", "none",
+                f"Cooldown: called {days_call} bday(s) ago, "
+                f"emailed {days_email} bday(s) ago — wait")
+
+    # 3. Email cooldown: emailed recently → suppress email actions
+    is_email_action = action in ("follow_up_email", "final_attempt_email")
+    if is_email_action and days_email is not None and days_email < COOLDOWN_EMAIL:
+        return ("none", "none",
+                f"Cooldown: emailed {days_email} bday(s) ago, "
+                f"wait {COOLDOWN_EMAIL - days_email} more bday(s)")
+
+    return action, priority, hint
+
+
 def main():
     # Load pipeline data (required)
     try:
@@ -321,8 +410,9 @@ def main():
         convo = convos.get(contact_id)
         lead.update(enrich_from_conversation(lead, convo))
 
-        # Run decision tree
+        # Run decision tree, then apply cooldown
         action, priority, hint = decide_action(lead)
+        action, priority, hint = apply_cooldown(lead, action, priority, hint)
         lead["suggestedAction"] = action
         lead["suggestedPriority"] = priority
         lead["hint"] = hint
