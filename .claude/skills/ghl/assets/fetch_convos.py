@@ -43,10 +43,10 @@ def fetch_notes(contact_id, auth):
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read())
             notes_raw = body.get("notes", [])
-            # Sort by dateAdded descending, take last 5
+            # Sort by dateAdded descending (newest first)
             notes_raw.sort(key=lambda n: n.get("dateAdded", ""), reverse=True)
             return [{"body": n.get("body", ""), "dateAdded": n.get("dateAdded", "")}
-                    for n in notes_raw[:5]]
+                    for n in notes_raw]
         except urllib.error.HTTPError as e:
             if e.code in (500, 503) and attempt == 0:
                 time.sleep(2)

@@ -314,7 +314,7 @@ Run the conversation fetch script to collect metadata for all active leads:
 python3 .claude/skills/ghl/assets/fetch_convos.py
 ```
 
-This script reads `/tmp/ftl_pipeline.json`, fetches conversation metadata and contact notes for each active lead via the GHL REST API (max 3 concurrent, with retry), and writes `/tmp/ftl_convos.json`. Each contact entry includes a `notes` array (last 5 notes, newest first) with `body` and `dateAdded`.
+This script reads `/tmp/ftl_pipeline.json`, fetches conversation metadata and contact notes for each active lead via the GHL REST API (max 3 concurrent, with retry), and writes `/tmp/ftl_convos.json`. Each non-"New Lead" contact entry includes a `notes` array (all notes, newest first) with `body` and `dateAdded`.
 
 **On 401 error:** The script prints instructions to run `ghl_oauth_setup.py` or update the PIT token. Stop the report and relay this to Philip.
 
@@ -342,7 +342,7 @@ The enriched data adds these fields to each lead:
 - `hasManualOutreach` — whether a human (not automation) has reached out
 - `daysSinceLastContact` — days since most recent message
 - `noConversation` — no conversation history found
-- `notes` — array of up to 5 recent contact notes (each with `body` and `dateAdded`), newest first
+- `notes` — all contact notes (each with `body` and `dateAdded`), newest first. Claude reads these to inform action decisions; the dashboard shows them in a collapsible section
 - `suggestedAction` — one of: reply, outreach, call, follow_up_email, move, none
 - `suggestedPriority` — high, medium, info, or none
 - `hint` — human-readable reason for the suggestion
@@ -356,7 +356,12 @@ The enrichment script (Phase 2.5) has already computed `suggestedAction`, `sugge
 2. Override if conversation context warrants it (e.g., lead said "back next week", project is out of scope, lead explicitly declined)
 3. Map to dashboard action format: reply, outreach, call, follow_up_email, move, or none
 4. Use `missingInfo`, `isInternational`, `hasArtwork`, etc. directly — do NOT re-derive these from raw custom fields
-5. Include `notes` array in each action object — the dashboard displays these as collapsible "Prior notes" on action cards. Use note content as context when drafting messages (e.g., if a note says "customer said they'll be back next week", adjust tone/timing accordingly)
+5. **Read all contact notes carefully** — the `notes` array contains every note Philip/Albert have added to this contact (newest first). Use these to understand the lead's status, history, and any commitments made. Notes should inform:
+   - Whether to override `suggestedAction` (e.g., note says "waiting on artwork from designer" → don't nag about artwork)
+   - Message tone and content (e.g., note says "spoke on phone, wants quote by Friday" → reference the conversation)
+   - Whether a lead is actually dead (e.g., note says "not interested, wrong service" → move to Unqualified instead of Cooled Off)
+   - The `context` string on each action card: if notes contain useful status info (what the customer wants, what was promised, what's pending), incorporate it into the context so Philip sees it at a glance without expanding the notes. Keep it concise — append a short "Note: ..." phrase, don't dump the whole note
+   - Include the `notes` array in each action object so the dashboard shows them as collapsible "Prior notes" for Philip's reference
 
 For each action, draft a message following these rules:
 
@@ -414,7 +419,7 @@ Pre-write both a "tried calling" SMS and email for each call action:
       "contactPhone": "(508) 308-0059",
       "opportunityId": "xxx",
       "stage": "Follow Up",
-      "context": "Replied today asking for invoice and minimum order info. Ready to buy.",
+      "context": "Replied today asking for invoice and minimum order info. Ready to buy. Note: wants 50 black tees with white logo.",
       "notes": [{"body": "Customer wants 50 black tees with white logo", "dateAdded": "2026-02-20T14:30:00Z"}],
       "messageType": "Email",
       "subject": "Invoice + Order Details — FTL Prints",

@@ -147,6 +147,10 @@ function showNoAnswer(btn, id) {
   const card = btn.closest('.action-card');
   card.querySelector('.call-result').style.display = 'none';
   card.querySelector('.call-noanswer').style.display = 'block';
+  // Auto-log a "no answer" note for activity tracking
+  const today = new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  fetch('/api/note/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({body: `Called — no answer (${today})`})}).catch(() => {});
 }
 function textToHtml(text) {
   return '<p>' + text.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
