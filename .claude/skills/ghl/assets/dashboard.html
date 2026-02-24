@@ -317,6 +317,7 @@ function buildEmailCard(a) {
       </div>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>` : ''}
     <div class="context">${esc(a.context)}</div>
     ${buildNotesHtml(a.notes)}
     <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
@@ -342,10 +343,10 @@ function buildCallCard(a) {
       <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    <div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>
     <div class="context">${esc(a.context)}</div>
     ${buildNotesHtml(a.notes)}
     <div class="call-initial">
-      <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);font-size:0.95rem;margin-right:12px;">${esc(a.contactPhone)}</a>
       <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
     </div>
     <div class="call-result" style="display:none;">
@@ -390,6 +391,7 @@ function buildMoveCard(a) {
       </div>
     </div>
     <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
+    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>` : ''}
     <div class="context">${esc(a.context)}</div>
     ${buildNotesHtml(a.notes)}
     <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
