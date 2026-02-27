@@ -51,6 +51,7 @@
   .contact-name { font-weight: 600; font-size: 1rem; }
   .contact-detail { color: var(--text2); font-size: 0.85rem; }
   .context { color: var(--text2); font-size: 0.85rem; margin-bottom: 8px; }
+  .recommendation { color: var(--text2); font-size: 0.85rem; margin-bottom: 8px; }
 
   .preview-toggle { cursor: pointer; color: var(--accent); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
   .preview-toggle:hover { text-decoration: underline; }
@@ -106,6 +107,21 @@
     padding: 8px 12px; margin-bottom: 6px; font-size: 0.8rem; }
   .prior-note .note-date { color: var(--text2); font-size: 0.7rem; margin-bottom: 2px; }
   .prior-note .note-body { color: var(--text); }
+
+  .convo-history-toggle { cursor: pointer; color: var(--text2); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
+  .convo-history-toggle:hover { color: var(--accent); text-decoration: underline; }
+  .convo-history-list { margin-top: 6px; display: none; }
+  .convo-history-list.open { display: block; }
+  .convo-msg { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; margin-bottom: 6px; font-size: 0.8rem; }
+  .convo-msg .msg-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 2px; }
+  .convo-msg .msg-arrow { font-size: 0.85rem; }
+  .convo-msg .msg-arrow.inbound { color: var(--green); }
+  .convo-msg .msg-arrow.outbound { color: var(--accent); }
+  .convo-msg .msg-channel { font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 3px; background: var(--surface2); color: var(--text2); }
+  .convo-msg .msg-date { color: var(--text2); font-size: 0.7rem; }
+  .convo-msg .msg-body { color: var(--text); margin-top: 2px; }
 
   .loading { text-align: center; padding: 60px 0; color: var(--text2); font-size: 1.1rem; }
 </style>
@@ -219,6 +235,32 @@ function buildNotesHtml(notes) {
   return `<button class="prior-notes-toggle" onclick="togglePriorNotes(this)">\u25b8 Prior notes (${notes.length})</button><div class="prior-notes-list">${items}</div>`;
 }
 
+function toggleConvoHistory(btn) {
+  const list = btn.nextElementSibling;
+  list.classList.toggle('open');
+  const count = list.querySelectorAll('.convo-msg').length;
+  btn.textContent = list.classList.contains('open')
+    ? `\u25be Hide recent messages (${count})`
+    : `\u25b8 Recent messages (${count})`;
+}
+
+function buildConvoHistoryHtml(messages) {
+  if (!messages || messages.length === 0) return '';
+  let items = '';
+  for (const m of messages) {
+    const dir = m.direction || 'unknown';
+    const arrow = dir === 'inbound' ? '\u2190' : '\u2192';
+    const arrowCls = dir === 'inbound' ? 'inbound' : 'outbound';
+    const channel = (m.channel || '').toUpperCase();
+    const d = m.date ? new Date(m.date).toLocaleDateString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
+    const body = m.body || '';
+    if (!body) continue;
+    items += `<div class="convo-msg"><div class="msg-meta"><span class="msg-arrow ${arrowCls}">${arrow}</span><span class="msg-channel">${esc(channel)}</span><span class="msg-date">${esc(d)}</span></div><div class="msg-body">${esc(body)}</div></div>`;
+  }
+  if (!items) return '';
+  return `<button class="convo-history-toggle" onclick="toggleConvoHistory(this)">\u25b8 Recent messages (${messages.length})</button><div class="convo-history-list">${items}</div>`;
+}
+
 async function saveCardNote(id, btn) {
   if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
   const area = btn.closest('.note-area');
@@ -330,13 +372,15 @@ function buildEmailCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company}</div>
     ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
-    <div class="context">${esc(a.context)}</div>
+    <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
+    ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
     <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
     <div class="msg-preview">
       <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
       <textarea class="edit-body" rows="5" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.message || '')}</textarea>
     </div>
     <div class="card-inline-actions">
+      ${buildConvoHistoryHtml(a.conversationHistory)}
       ${buildNotesHtml(a.notes)}
       <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
       <div class="note-area" style="display:none;">
@@ -356,11 +400,13 @@ function buildCallCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company}</div>
     <div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>
-    <div class="context">${esc(a.context)}</div>
+    <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
+    ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
     <div class="call-initial">
       <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
     </div>
     <div class="card-inline-actions">
+      ${buildConvoHistoryHtml(a.conversationHistory)}
       ${buildNotesHtml(a.notes)}
       <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
       <div class="note-area" style="display:none;">
@@ -404,8 +450,10 @@ function buildMoveCard(a) {
     </div>
     <div class="contact-name">${esc(a.contactName)}${company}</div>
     ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
-    <div class="context">${esc(a.context)}</div>
+    <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
+    ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
     <div class="card-inline-actions">
+      ${buildConvoHistoryHtml(a.conversationHistory)}
       ${buildNotesHtml(a.notes)}
       <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
       <div class="note-area" style="display:none;">

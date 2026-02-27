@@ -314,7 +314,7 @@ Run the conversation fetch script to collect metadata for all active leads:
 python3 .claude/skills/ghl/assets/fetch_convos.py
 ```
 
-This script reads `/tmp/ftl_pipeline.json`, fetches conversation metadata and contact notes for each active lead via the GHL REST API (max 3 concurrent, with retry), and writes `/tmp/ftl_convos.json`. Each non-"New Lead" contact entry includes a `notes` array (all notes, newest first) with `body` and `dateAdded`.
+This script reads `/tmp/ftl_pipeline.json`, fetches conversation metadata, contact notes, and recent message bodies for each active lead via the GHL REST API (max 3 concurrent, with retry), and writes `/tmp/ftl_convos.json`. Each non-"New Lead" contact entry includes a `notes` array (all notes, newest first) with `body` and `dateAdded`, plus a `messages` array (up to 20 most recent messages, newest first) with `direction`, `channel`, `body` (plain text, max 500 chars), and `date`.
 
 **On 401 error:** The script prints instructions to run `ghl_oauth_setup.py` or update the PIT token. Stop the report and relay this to Philip.
 
@@ -343,6 +343,7 @@ The enriched data adds these fields to each lead:
 - `daysSinceLastContact` — days since most recent message
 - `noConversation` — no conversation history found
 - `notes` — all contact notes (each with `body` and `dateAdded`), newest first. Claude reads these to inform action decisions; the dashboard shows them in a collapsible section
+- `conversationHistory` — up to 20 most recent messages (newest first), each with `direction` (inbound/outbound), `channel` (email/sms/call), `body` (plain text, HTML stripped, max 500 chars), and `date`. Use to understand what was actually discussed — not just when/how, but what
 - `suggestedAction` — one of: reply, outreach, call, follow_up_email, move, none
 - `suggestedPriority` — high, medium, info, or none
 - `hint` — human-readable reason for the suggestion
@@ -356,11 +357,21 @@ The enrichment script (Phase 2.5) has already computed `suggestedAction`, `sugge
 2. Override if conversation context warrants it (e.g., lead said "back next week", project is out of scope, lead explicitly declined)
 3. Map to dashboard action format: reply, outreach, call, follow_up_email, move, or none
 4. Use `missingInfo`, `isInternational`, `hasArtwork`, etc. directly — do NOT re-derive these from raw custom fields
-5. **Read all contact notes carefully** — the `notes` array contains every note Philip/Albert have added to this contact (newest first). Use these to understand the lead's status, history, and any commitments made. Notes should inform:
+5. **Read conversation history AND notes carefully** — two data sources inform context:
+
+   **`conversationHistory`** (up to 20 recent messages with actual text):
+   - Read the message bodies to understand what was actually discussed — what the customer asked for, what was quoted, what questions are unanswered
+   - Write `context` strings that reference specific things: "Asked about bulk pricing for 200 polos, waiting on size breakdown" instead of "2 days no response — follow up"
+   - Flag unanswered questions from either side (customer asked something we didn't answer, or we asked for info they haven't provided)
+   - Keep `context` under ~200 chars but pack it with the most relevant detail from the conversation
+   - Always include the FULL `conversationHistory` array from enrichment in each action object — do not trim, filter, or curate it. The dashboard shows it in an expandable "Recent messages" section
+   - Write a short `recommendation` string (under ~150 chars) — the specific next step Philip should take for this lead. This should be actionable and concrete, e.g. "Call to discuss sizing, then send quote" or "Send follow-up email asking for artwork files". Base it on conversation history, notes, enrichment data, stage, and hint. The dashboard renders this below the Summary line.
+
+   **`notes`** (Philip/Albert's internal notes, newest first):
    - Whether to override `suggestedAction` (e.g., note says "waiting on artwork from designer" → don't nag about artwork)
    - Message tone and content (e.g., note says "spoke on phone, wants quote by Friday" → reference the conversation)
    - Whether a lead is actually dead (e.g., note says "not interested, wrong service" → move to Unqualified instead of Cooled Off)
-   - The `context` string on each action card: if notes contain useful status info (what the customer wants, what was promised, what's pending), incorporate it into the context so Philip sees it at a glance without expanding the notes. Keep it concise — append a short "Note: ..." phrase, don't dump the whole note
+   - If notes contain useful status info beyond what's in the messages, append a short "Note: ..." phrase to `context`
    - Include the `notes` array in each action object so the dashboard shows them as collapsible "Prior notes" for Philip's reference
 
 For each action, draft a message following these rules:
@@ -419,7 +430,12 @@ Pre-write both a "tried calling" SMS and email for each call action:
       "contactPhone": "(508) 308-0059",
       "opportunityId": "xxx",
       "stage": "Follow Up",
-      "context": "Replied today asking for invoice and minimum order info. Ready to buy. Note: wants 50 black tees with white logo.",
+      "context": "Replied asking for invoice + minimum qty. Wants 50 black tees with white logo for company event.",
+      "recommendation": "Reply with invoice and confirm minimum order is 24 pieces.",
+      "conversationHistory": [
+        {"direction": "inbound", "channel": "email", "body": "Hi, can you send me an invoice for 50 black tees with our white logo? Also what's your minimum order?", "date": "2026-02-27T10:15:00Z"},
+        {"direction": "outbound", "channel": "email", "body": "Hey Ian, thanks for reaching out! We'd be happy to help...", "date": "2026-02-25T14:00:00Z"}
+      ],
       "notes": [{"body": "Customer wants 50 black tees with white logo", "dateAdded": "2026-02-20T14:30:00Z"}],
       "messageType": "Email",
       "subject": "Invoice + Order Details — FTL Prints",
@@ -439,6 +455,7 @@ Pre-write both a "tried calling" SMS and email for each call action:
       "opportunityId": "xxx",
       "stage": "In Progress",
       "context": "Last outbound email 2 days ago, no response. Domestic number — call.",
+      "recommendation": "Call to check in on screen printing order, follow up with SMS/email if no answer.",
       "messageType": "Call",
       "noAnswerSms": "Hey Mike, tried calling about your screen printing order. Any questions? —Phil",
       "noAnswerSubject": "Tried Calling — Your Screen Printing Order",
@@ -455,6 +472,7 @@ Pre-write both a "tried calling" SMS and email for each call action:
       "opportunityId": "xxx",
       "stage": "Follow Up",
       "context": "No response after 12 days and 2 follow-ups.",
+      "recommendation": "Move to Cooled Off — no engagement after multiple attempts.",
       "targetStageId": "7ec748b8-920d-4bdb-bf09-74dd22d27846",
       "messageType": null,
       "international": false

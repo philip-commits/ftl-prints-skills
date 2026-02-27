@@ -192,6 +192,7 @@ def enrich_from_conversation(lead, convo):
             "noConversation": True,
             "conversationId": None,
             "notes": [],
+            "conversationHistory": [],
         }
 
     now = datetime.now(timezone.utc)
@@ -228,6 +229,7 @@ def enrich_from_conversation(lead, convo):
         "noConversation": False,
         "conversationId": convo.get("conversationId"),
         "notes": convo.get("notes", []),
+        "conversationHistory": convo.get("messages", []),
     }
 
 

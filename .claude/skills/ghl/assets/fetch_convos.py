@@ -16,6 +16,7 @@ import time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,10 +28,62 @@ LOCATION_ID = "iCyLg9rh8NtPpTfFCcGk"
 GHL_BASE = "https://services.leadconnectorhq.com"
 MAX_WORKERS = 3
 
+# Channel type mapping for friendly names
+CHANNEL_MAP_NAMES = {
+    "TYPE_EMAIL": "email",
+    "TYPE_SMS": "sms",
+    "TYPE_CALL": "call",
+}
+
+
+class _HTMLStripper(HTMLParser):
+    """Lightweight HTML-to-text converter using stdlib html.parser."""
+
+    def __init__(self):
+        super().__init__()
+        self._parts = []
+        self._skip = False  # skip content inside <style>/<script>
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("style", "script"):
+            self._skip = True
+
+    def handle_endtag(self, tag):
+        if tag in ("style", "script"):
+            self._skip = False
+
+    def handle_data(self, data):
+        if not self._skip:
+            self._parts.append(data)
+
+    def get_text(self):
+        return " ".join("".join(self._parts).split())
+
+
+def strip_html(html_str):
+    """Strip HTML tags and collapse whitespace. Returns plain text."""
+    if not html_str:
+        return ""
+    import re
+    # Remove <style> and <script> blocks before parsing (belt and suspenders)
+    cleaned = re.sub(r'<style[^>]*>.*?</style>', '', html_str, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r'<script[^>]*>.*?</script>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    # Trim quoted reply chains (gmail_quote, blockquote, "On ... wrote:")
+    cleaned = re.sub(r'<div\s+class="gmail_quote[^"]*".*', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r'<blockquote[^>]*>.*', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    s = _HTMLStripper()
+    try:
+        s.feed(cleaned)
+        text = s.get_text()
+        # Trim "On <date> ... wrote:" trailing patterns (plain-text quoted replies)
+        text = re.split(r'\s*On\s+\w{3},\s+\w{3}\s+\d', text)[0]
+        return text.strip()
+    except Exception:
+        return html_str
 
 
 def fetch_notes(contact_id, auth):
-    """Fetch the last 5 notes for a contact, sorted by dateAdded descending."""
+    """Fetch all notes for a contact, sorted by dateAdded descending."""
     url = f"{GHL_BASE}/contacts/{contact_id}/notes"
     req = urllib.request.Request(url, headers={
         "Authorization": auth,
@@ -59,8 +112,34 @@ def fetch_notes(contact_id, auth):
             return []
 
 
-def fetch_outbound_count(conversation_id, auth):
-    """Fetch messages for a conversation, count outbound ones, and track per-channel timestamps."""
+def fetch_email_body(message_id, auth):
+    """Fetch an individual email message to get its accurate body.
+
+    The list endpoint often omits or corrupts email bodies (returns quoted
+    thread text or empty body). The individual endpoint has the real HTML.
+    """
+    url = f"{GHL_BASE}/conversations/messages/{message_id}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": auth,
+        "Version": "2021-07-28",
+        "Accept": "application/json",
+        "User-Agent": "FTL-Prints-Pipeline/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        # Response wraps message in {"message": {...}, "traceId": ...}
+        msg = data.get("message", data)
+        raw_body = msg.get("body", "")
+        if raw_body:
+            return strip_html(raw_body)
+        return ""
+    except Exception:
+        return ""
+
+
+def fetch_messages(conversation_id, auth):
+    """Fetch messages for a conversation: outbound count, per-channel timestamps, and recent message bodies."""
     url = f"{GHL_BASE}/conversations/{conversation_id}/messages?limit=100"
     req = urllib.request.Request(url, headers={
         "Authorization": auth,
@@ -111,17 +190,49 @@ def fetch_outbound_count(conversation_id, auth):
                            or ts > channel_dates[channel_map[msg_type]]):
                     channel_dates[channel_map[msg_type]] = ts
 
-            return count, channel_dates
+            # Extract up to 20 most recent message bodies (newest first).
+            # For emails, the list endpoint often omits or corrupts bodies,
+            # so we fetch individually for the most recent emails (max 10).
+            recent_messages = []
+            email_fetches = 0
+            for m in messages[:20]:
+                direction = get_direction(m) or "unknown"
+                msg_type = m.get("messageType", "")
+                channel = CHANNEL_MAP_NAMES.get(msg_type, msg_type)
+                ts = m.get("dateAdded") or m.get("createdAt") or ""
+
+                if msg_type == "TYPE_EMAIL" and email_fetches < 10:
+                    # Email bodies from list endpoint are unreliable —
+                    # fetch individually for accurate content
+                    msg_id = m.get("id")
+                    text = fetch_email_body(msg_id, auth) if msg_id else ""
+                    email_fetches += 1
+                else:
+                    # SMS/call bodies are reliable from list endpoint
+                    text = m.get("body") or m.get("message") or ""
+
+                if len(text) > 500:
+                    text = text[:500] + "..."
+                if not text:
+                    continue
+                recent_messages.append({
+                    "direction": direction,
+                    "channel": channel,
+                    "body": text,
+                    "date": ts,
+                })
+
+            return count, channel_dates, recent_messages
         except urllib.error.HTTPError as e:
             if e.code in (500, 503) and attempt == 0:
                 time.sleep(2)
                 continue
-            return None, {}
+            return None, {}, []
         except Exception:
             if attempt == 0:
                 time.sleep(2)
                 continue
-            return None, {}
+            return None, {}, []
 
 
 def fetch_conversation(contact_id, auth, stage=""):
@@ -149,11 +260,11 @@ def fetch_conversation(contact_id, auth, stage=""):
             convo = conversations[0]
             convo_id = convo.get("id")
 
-            # Fetch outbound message count + per-channel timestamps
+            # Fetch outbound message count, per-channel timestamps, and recent messages
             if convo_id:
-                outbound_count, channel_dates = fetch_outbound_count(convo_id, auth)
+                outbound_count, channel_dates, recent_messages = fetch_messages(convo_id, auth)
             else:
-                outbound_count, channel_dates = None, {}
+                outbound_count, channel_dates, recent_messages = None, {}, []
 
             # Fetch contact notes (skip for New Leads — they won't have any)
             notes = fetch_notes(contact_id, auth) if stage != "New Lead" else []
@@ -168,6 +279,7 @@ def fetch_conversation(contact_id, auth, stage=""):
                 "conversationId": convo_id,
                 "outboundCount": outbound_count,
                 "notes": notes,
+                "messages": recent_messages,
             }
             result.update(channel_dates)
             return (contact_id, result)
@@ -227,8 +339,11 @@ def main():
                  if v and (v.get("unreadCount") or 0) > 0)
     with_notes = sum(1 for v in results.values()
                      if v and len(v.get("notes") or []) > 0)
+    with_msgs = sum(1 for v in results.values()
+                    if v and len(v.get("messages") or []) > 0)
     print(f"Done. {found}/{len(leads)} contacts have conversations "
-          f"({unread} with unread messages, {with_notes} with notes).")
+          f"({unread} with unread messages, {with_notes} with notes, "
+          f"{with_msgs} with message bodies).")
     print(f"Output written to {OUTPUT_FILE}")
 
 
