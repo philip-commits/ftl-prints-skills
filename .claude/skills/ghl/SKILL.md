@@ -485,23 +485,32 @@ The server and HTML dashboard are **static assets** in `.claude/skills/ghl/asset
 
 **Launch steps:**
 
+1. Remove stale sent state so buttons reset:
 ```bash
-# Kill any existing server on port 8787
-lsof -ti:8787 | xargs kill 2>/dev/null || true
-# Remove stale sent state so buttons reset
 rm -f /tmp/ftl_sent.json
-# Start the static server (reads actions from /tmp/ftl_actions.json)
+```
+
+2. Launch via Claude Preview (opens in the Preview panel, not a separate browser window):
+```
+Tool: mcp__Claude_Preview__preview_start
+Params:
+  - name: ghl-dashboard
+```
+
+This reads the `ghl-dashboard` configuration from `.claude/launch.json` and starts the server on port 8787 in the Preview panel. If the server is already running, it reuses the existing instance.
+
+**Fallback:** If `preview_start` is unavailable (e.g., no Preview MCP), fall back to manual launch:
+```bash
+lsof -ti:8787 | xargs kill 2>/dev/null || true
 python3 .claude/skills/ghl/assets/server.py &
-# Wait for server to start
 sleep 1
-# Open dashboard in browser
 open http://localhost:8787
 ```
 
 After launching, print a terminal TL;DR summary:
 
 ```
-Action dashboard opened in browser (localhost:8787).
+Action dashboard opened in Preview panel.
 
 X actions ready — Y high priority.
 
@@ -649,7 +658,7 @@ When drafting emails/texts for Philip:
 - **500 ECONNRESET:** Transient network error. Retry once. If it fails again, skip and note the gap.
 - **Tool result saved to temp file:** Large response. Use the python3 parsing script from Phase 1.
 - **Contact data mismatch:** Contact names in GHL may not match email domains (e.g., contact "Sabrina Thind" with email clark@clarkroofingflorida.com). Report both name and email to avoid confusion.
-- **Port 8787 in use:** Kill the existing process (`lsof -ti:8787 | xargs kill`) and retry.
+- **Port 8787 in use:** `preview_start` handles this automatically (reuses running server). If using manual fallback, kill with `lsof -ti:8787 | xargs kill` and retry.
 - **Server won't start:** Fall back to a terminal-based action list. Print numbered actions and let Philip say "send 1,3,5" to trigger sends via MCP tool calls directly.
 - **GHL API error on send:** The server returns error JSON to the browser. The button shows "Failed — retry" with the error message in a tooltip. Philip can click to retry.
 - **Token expired during send:** Server returns 401. OAuth tokens auto-refresh, so this likely means the refresh token expired. Run `ghl_oauth_setup.py` to re-authorize, or update the PIT token in `mcp.json`.
