@@ -92,6 +92,12 @@
     padding: 12px 16px; margin-top: 8px; }
   .action-card { transition: opacity 0.3s; }
 
+  .card-inline-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .card-inline-actions .send-btn { padding: 4px 12px; font-size: 0.75rem; }
+  .card-inline-actions .msg-preview,
+  .card-inline-actions .note-area,
+  .card-inline-actions .prior-notes-list { flex-basis: 100%; }
+
   .prior-notes-toggle { cursor: pointer; color: var(--text2); font-size: 0.8rem; border: none; background: none; padding: 4px 0; }
   .prior-notes-toggle:hover { color: var(--accent); text-decoration: underline; }
   .prior-notes-list { margin-top: 6px; display: none; }
@@ -124,6 +130,17 @@ function esc(s) {
   d.textContent = String(s);
   return d.innerHTML;
 }
+function fmtPhone(p) {
+  if (!p) return '';
+  const digits = p.replace(/\D/g, '');
+  if (digits.length === 11 && digits[0] === '1') {
+    return `(${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+  }
+  return p;
+}
 
 function toggleSection(header) {
   header.nextElementSibling.classList.toggle('open');
@@ -131,7 +148,11 @@ function toggleSection(header) {
 function togglePreview(btn) {
   const p = btn.nextElementSibling;
   p.classList.toggle('open');
-  btn.textContent = p.classList.contains('open') ? '\u25be Hide message' : '\u25b8 Edit message';
+  const isOpen = p.classList.contains('open');
+  btn.textContent = isOpen ? '\u25be Hide message' : '\u25b8 Edit message';
+  const card = btn.closest('.action-card');
+  const sendBtn = card.querySelector('.card-top .card-send-btn');
+  if (sendBtn) sendBtn.style.display = isOpen ? '' : 'none';
 }
 function showCallResult(btn) {
   const card = btn.closest('.action-card');
@@ -298,37 +319,30 @@ async function moveStage(id, btn) {
 }
 
 function buildEmailCard(a) {
-  const badges = [];
-  const badgeMap = {reply:'reply', outreach:'outreach', high_value_followup:'outreach', final_attempt_email:'final'};
-  const actionBadge = badgeMap[a.actionType] || 'followup';
-  const displayMap = {follow_up_email:'follow up', final_attempt_email:'final attempt', high_value_followup:'high-value follow up'};
-  const actionLabel = displayMap[a.actionType] || a.actionType;
-  badges.push(`<span class="badge ${esc(actionBadge)}">${esc(actionLabel)}</span>`);
-  badges.push('<span class="badge email">EMAIL</span>');
-  if (a.international) badges.push('<span class="badge intl">INTL</span>');
-
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
-      <div class="card-badges">${badges.join('')}</div>
+      <div class="card-badges"><span class="badge followup">${esc(a.stage)}</span></div>
       <div class="card-actions">
-        <button class="send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)">Send</button>
+        <button class="send-btn card-send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)" style="display:none;">Send</button>
         <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
       </div>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
-    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>` : ''}
+    <div class="contact-name">${esc(a.contactName)}${company}</div>
+    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
     <div class="context">${esc(a.context)}</div>
-    ${buildNotesHtml(a.notes)}
     <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
     <div class="msg-preview">
       <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
       <textarea class="edit-body" rows="5" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.message || '')}</textarea>
     </div>
-    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-    <div class="note-area" style="display:none;">
-      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+    <div class="card-inline-actions">
+      ${buildNotesHtml(a.notes)}
+      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+      <div class="note-area" style="display:none;">
+        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+      </div>
     </div>
   </div>`;
 }
@@ -337,17 +351,22 @@ function buildCallCard(a) {
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
-      <div class="card-badges">
-        <span class="badge call">CALL</span>
-      </div>
+      <div class="card-badges"><span class="badge call">${esc(a.stage)}</span></div>
       <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
-    <div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>
+    <div class="contact-name">${esc(a.contactName)}${company}</div>
+    <div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>
     <div class="context">${esc(a.context)}</div>
-    ${buildNotesHtml(a.notes)}
     <div class="call-initial">
       <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
+    </div>
+    <div class="card-inline-actions">
+      ${buildNotesHtml(a.notes)}
+      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+      <div class="note-area" style="display:none;">
+        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+      </div>
     </div>
     <div class="call-result" style="display:none;">
       <button class="send-btn ready" onclick="showAnswered(this, ${a.id})" style="margin-right:8px;">Answered</button>
@@ -370,11 +389,6 @@ function buildCallCard(a) {
         <button class="send-btn ready" data-action-id="${a.id}_email" onclick="sendEmailFromCall(${a.id}, this)" style="margin-top:6px;">Send Email</button>
       </div>
     </div>
-    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-    <div class="note-area" style="display:none;">
-      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
-    </div>
   </div>`;
 }
 
@@ -382,22 +396,22 @@ function buildMoveCard(a) {
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
-      <div class="card-badges">
-        <span class="badge move">MOVE</span>
-      </div>
+      <div class="card-badges"><span class="badge move">${esc(a.stage)}</span></div>
       <div class="card-actions">
         <button class="send-btn move-btn ready" data-action-id="${a.id}" onclick="moveStage(${a.id}, this)">Move to Cooled Off</button>
         <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
       </div>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company} (${esc(a.stage)})</div>
-    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${esc(a.contactPhone)}</a></div>` : ''}
+    <div class="contact-name">${esc(a.contactName)}${company}</div>
+    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
     <div class="context">${esc(a.context)}</div>
-    ${buildNotesHtml(a.notes)}
-    <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-    <div class="note-area" style="display:none;">
-      <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-      <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+    <div class="card-inline-actions">
+      ${buildNotesHtml(a.notes)}
+      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
+      <div class="note-area" style="display:none;">
+        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
+        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
+      </div>
     </div>
   </div>`;
 }
@@ -502,6 +516,7 @@ function renderDashboard(data) {
         if (info.status === 'moved') btn.textContent = 'Moved \u2713';
         else if (info.status === 'noted') btn.textContent = 'Saved \u2713';
         else btn.textContent = 'Sent \u2713';
+        if (btn.classList.contains('card-send-btn')) btn.style.display = '';
       }
     }
     updateStats();
