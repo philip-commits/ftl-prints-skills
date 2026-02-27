@@ -313,7 +313,8 @@ def build_summary(contacts_with_activity, date_str, total_opps, fetched_at):
 
 
 def print_summary(result):
-    """Print a quick terminal summary."""
+    """Print a visually formatted terminal summary."""
+    import re
     t = result["totals"]
     ob = t["outbound"]
     ib = t["inbound"]
@@ -323,52 +324,86 @@ def print_summary(result):
     total_manual = ob["email"]["manual"] + ob["sms"]["manual"] + ob["call"]["manual"]
     total_auto = ob["email"]["automated"] + ob["sms"]["automated"] + ob["call"]["automated"]
 
-    print(f"\n=== Activity Summary — {result['date']} ===")
-    print(f"Scanned {result['totalOpportunities']} opportunities, "
-          f"{result['contactsWithActivity']} contacts with activity today.\n")
+    DIM = "\033[2m"
+    BOLD = "\033[1m"
+    GREEN = "\033[32m"
+    CYAN = "\033[36m"
+    YELLOW = "\033[33m"
+    MAGENTA = "\033[35m"
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
+    WHITE = "\033[97m"
 
-    print(f"Outbound: {total_out} total ({total_manual} manual, {total_auto} automated)")
-    if ob["email"]["total"]:
-        print(f"  Email: {ob['email']['total']} ({ob['email']['manual']} manual, {ob['email']['automated']} auto)")
-    if ob["sms"]["total"]:
-        print(f"  SMS:   {ob['sms']['total']} ({ob['sms']['manual']} manual, {ob['sms']['automated']} auto)")
-    if ob["call"]["total"]:
-        print(f"  Call:  {ob['call']['total']} ({ob['call']['manual']} manual, {ob['call']['automated']} auto)")
+    W = 52  # box width (inner)
 
-    print(f"\nInbound: {total_in} total")
-    if ib["email"]:
-        print(f"  Email: {ib['email']}")
-    if ib["sms"]:
-        print(f"  SMS:   {ib['sms']}")
-    if ib["call"]:
-        print(f"  Call:  {ib['call']}")
+    def box_top():
+        print(f"  {DIM}{'─' * (W + 2)}{RESET}")
 
+    def box_row(left, right="", pad=W):
+        content = f"{left}{right}"
+        visible = re.sub(r'\033\[[0-9;]*m', '', content)
+        spacing = pad - len(visible)
+        print(f"  {DIM}│{RESET} {content}{' ' * max(spacing, 0)} {DIM}│{RESET}")
+
+    def box_sep():
+        print(f"  {DIM}├{'─' * (W + 2)}┤{RESET}")
+
+    def box_bottom():
+        print(f"  {DIM}{'─' * (W + 2)}{RESET}")
+
+    # Header
+    print()
+    print(f"  {BOLD}{WHITE}Activity Summary{RESET}  {DIM}—  {result['date']}{RESET}")
+    print(f"  {DIM}{result['totalOpportunities']} opportunities scanned  ·  "
+          f"{result['contactsWithActivity']} with activity{RESET}")
+    print()
+
+    # Outbound table
+    print(f"  {BOLD}{CYAN}OUTBOUND{RESET}  {DIM}{total_out} total  ({total_manual} manual · {total_auto} automated){RESET}")
+    box_top()
+    box_row(f"  {'Channel':<10}  {'Manual':>8}  {'Auto':>8}  {'Total':>8}")
+    box_sep()
+    for channel, key in [("Email", "email"), ("SMS", "sms"), ("Call", "call")]:
+        m = ob[key]["manual"]
+        a = ob[key]["automated"]
+        tot = ob[key]["total"]
+        if tot == 0:
+            box_row(f"  {DIM}{channel:<10}  {m:>8}  {a:>8}  {tot:>8}{RESET}")
+        else:
+            m_str = f"{GREEN}{m}{RESET}" if m > 0 else f"{DIM}{m}{RESET}"
+            a_str = f"{YELLOW}{a}{RESET}" if a > 0 else f"{DIM}{a}{RESET}"
+            t_str = f"{WHITE}{BOLD}{tot}{RESET}"
+            box_row(f"  {channel:<10}  {m_str:>19}  {a_str:>19}  {t_str:>15}")
+    box_bottom()
+
+    # Inbound table
+    total_in_display = f"  {DIM}{total_in} total{RESET}" if total_in == 0 else f"  {total_in} total"
+    print(f"\n  {BOLD}{GREEN}INBOUND{RESET}{total_in_display}")
+    if total_in > 0:
+        box_top()
+        for channel, key in [("Email", "email"), ("SMS", "sms"), ("Call", "call")]:
+            v = ib[key]
+            if v > 0:
+                box_row(f"  {channel:<10}  {BOLD}{v}{RESET}")
+        box_bottom()
+
+    # Other activity
+    other_items = []
     if t["stageChanges"]:
-        print(f"\nStage changes: {t['stageChanges']}")
+        other_items.append(("Stage moves", t["stageChanges"], MAGENTA))
     if t["notes"]:
-        print(f"Notes created: {t['notes']}")
+        other_items.append(("Notes", t["notes"], BLUE))
     if t["tasks"]:
-        print(f"Tasks created: {t['tasks']}")
+        other_items.append(("Tasks", t["tasks"], BLUE))
+    if other_items:
+        print(f"\n  {BOLD}{YELLOW}OTHER{RESET}")
+        box_top()
+        for label, count, color in other_items:
+            box_row(f"  {label:<16}  {color}{BOLD}{count}{RESET}")
+        box_bottom()
 
-    if result["contacts"]:
-        print(f"\n--- Per-Contact ---")
-        for c in result["contacts"]:
-            parts = []
-            out_msgs = [m for m in c["messages"] if m["direction"] == "outbound"]
-            in_msgs = [m for m in c["messages"] if m["direction"] == "inbound"]
-            if out_msgs:
-                parts.append(f"{len(out_msgs)} out")
-            if in_msgs:
-                parts.append(f"{len(in_msgs)} in")
-            if c["stageChanges"]:
-                parts.append(f"{len(c['stageChanges'])} stage change(s)")
-            if c["notes"]:
-                parts.append(f"{len(c['notes'])} note(s)")
-            if c["tasks"]:
-                parts.append(f"{len(c['tasks'])} task(s)")
-            print(f"  {c['contactName']} ({c['stage']}): {', '.join(parts)}")
-
-    print(f"\nOutput written to {OUTPUT_FILE}")
+    print(f"\n  {DIM}Saved to {OUTPUT_FILE}{RESET}")
+    print()
 
 
 def main():

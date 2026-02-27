@@ -63,17 +63,6 @@ Read: /tmp/ftl_activity.json
 - **Notes created:** {n}
 - **Tasks created:** {n}
 
-### Per-Contact Detail
-
-For each contact with activity today, list:
-
-**{Contact Name}** ({stage})
-- Outbound: {count} email, {count} SMS — {manual/automated breakdown}
-- Inbound: {count} email, {count} SMS
-- Stage: moved from {old} to {new} (if applicable)
-- Notes: {count} created
-- Tasks: {count} created
-
 ---
 
 ## Notes
@@ -83,5 +72,5 @@ For each contact with activity today, list:
   - **Manual** = sent by a human via the GHL app (source=app or userId present)
   - **Automated** = sent by a workflow (source=workflow)
   - **API** = sent via API integration (source=api) — counted under automated
-- Only contacts with today's activity are shown in the per-contact section
 - The script reuses OAuth2 auth from the `/ghl` skill (`ghl_auth.py`)
+- Per-contact detail is available in `/tmp/ftl_activity.json` if needed

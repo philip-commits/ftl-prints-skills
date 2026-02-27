@@ -14,6 +14,7 @@ Each skill lives in `.claude/skills/` with its own folder and `SKILL.md` file:
 ## Available Skills
 
 - `.claude/skills/ghl/` — Daily pipeline briefing via GoHighLevel CRM
+- `.claude/skills/ghl-activity/` — Daily CRM activity summary (messages, notes, tasks, stage changes)
 
 ## Dependencies
 
