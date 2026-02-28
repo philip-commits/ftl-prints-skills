@@ -93,6 +93,19 @@
     padding: 12px 16px; margin-top: 8px; }
   .action-card { transition: opacity 0.3s; }
 
+  .icon-btn { background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text2); cursor: pointer; padding: 5px 7px; line-height: 1;
+    transition: all 0.15s; display: inline-flex; align-items: center; }
+  .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .icon-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(56,189,248,0.1); }
+  .icon-btn.sent { color: var(--green); border-color: var(--green); background: rgba(34,197,94,0.1); pointer-events: none; }
+  .icon-btn[disabled] { opacity: 0.25; cursor: default; pointer-events: none; }
+  .compose-area { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; margin-top: 10px; display: none; }
+  .compose-area.open { display: block; }
+  .compose-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .compose-label { font-size: 0.8rem; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+
   .card-inline-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .card-inline-actions .send-btn { padding: 4px 12px; font-size: 0.75rem; }
   .card-inline-actions .msg-preview,
@@ -221,8 +234,8 @@ function togglePriorNotes(btn) {
   list.classList.toggle('open');
   const count = list.querySelectorAll('.prior-note').length;
   btn.textContent = list.classList.contains('open')
-    ? `\u25be Hide prior notes (${count})`
-    : `\u25b8 Prior notes (${count})`;
+    ? `\u25be Notes (${count})`
+    : `\u25b8 Notes (${count})`;
 }
 
 function buildNotesHtml(notes) {
@@ -232,7 +245,7 @@ function buildNotesHtml(notes) {
     const d = n.dateAdded ? new Date(n.dateAdded).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
     items += `<div class="prior-note"><div class="note-date">${esc(d)}</div><div class="note-body">${esc(n.body)}</div></div>`;
   }
-  return `<button class="prior-notes-toggle" onclick="togglePriorNotes(this)">\u25b8 Prior notes (${notes.length})</button><div class="prior-notes-list">${items}</div>`;
+  return `<button class="prior-notes-toggle" onclick="togglePriorNotes(this)">\u25b8 Notes (${notes.length})</button><div class="prior-notes-list">${items}</div>`;
 }
 
 function toggleConvoHistory(btn) {
@@ -240,8 +253,8 @@ function toggleConvoHistory(btn) {
   list.classList.toggle('open');
   const count = list.querySelectorAll('.convo-msg').length;
   btn.textContent = list.classList.contains('open')
-    ? `\u25be Hide recent messages (${count})`
-    : `\u25b8 Recent messages (${count})`;
+    ? `\u25be Messages (${count})`
+    : `\u25b8 Messages (${count})`;
 }
 
 function buildConvoHistoryHtml(messages) {
@@ -258,12 +271,12 @@ function buildConvoHistoryHtml(messages) {
     items += `<div class="convo-msg"><div class="msg-meta"><span class="msg-arrow ${arrowCls}">${arrow}</span><span class="msg-channel">${esc(channel)}</span><span class="msg-date">${esc(d)}</span></div><div class="msg-body">${esc(body)}</div></div>`;
   }
   if (!items) return '';
-  return `<button class="convo-history-toggle" onclick="toggleConvoHistory(this)">\u25b8 Recent messages (${messages.length})</button><div class="convo-history-list">${items}</div>`;
+  return `<button class="convo-history-toggle" onclick="toggleConvoHistory(this)">\u25b8 Messages (${messages.length})</button><div class="convo-history-list">${items}</div>`;
 }
 
 async function saveCardNote(id, btn) {
   if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
-  const area = btn.closest('.note-area');
+  const area = btn.closest('.compose-note') || btn.closest('.note-area');
   const body = area.querySelector('.card-note').value;
   if (!body.trim()) return;
   btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Saving...';
@@ -271,7 +284,11 @@ async function saveCardNote(id, btn) {
     const r = await fetch('/api/note/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({body})});
     const d = await r.json();
-    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Saved \u2713'; }
+    if (d.success) {
+      btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Saved \u2713';
+      const card = btn.closest('.action-card');
+      if (card) { const icon = card.querySelector('.note-icon'); if (icon) icon.classList.add('sent'); }
+    }
     else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
   } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
 }
@@ -291,30 +308,38 @@ function updateStats() {
 
 async function sendEmail(id, btn) {
   if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
-  const card = btn.closest('.action-card');
-  const subject = card.querySelector('.edit-subject').value;
-  const message = card.querySelector('.edit-body').value;
+  const compose = btn.closest('.compose-email');
+  const subject = compose.querySelector('.edit-subject').value;
+  const message = compose.querySelector('.edit-body').value;
   const html = textToHtml(message);
   btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Sending...';
   try {
     const r = await fetch('/api/send/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({type:'Email', subject, message, html})});
     const d = await r.json();
-    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713'; }
+    if (d.success) {
+      btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713';
+      const card = btn.closest('.action-card');
+      if (card) { const icon = card.querySelector('.email-icon'); if (icon) icon.classList.add('sent'); }
+    }
     else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
   } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
 }
 
 async function sendSms(id, btn) {
   if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
-  const card = btn.closest('.action-card') || btn.closest('.call-noanswer');
-  const message = card.querySelector('.edit-sms').value;
+  const compose = btn.closest('.compose-sms') || btn.closest('.call-noanswer');
+  const message = compose.querySelector('.edit-sms').value;
   btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Sending...';
   try {
     const r = await fetch('/api/send/' + id + '_sms', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({type:'SMS', message})});
     const d = await r.json();
-    if (d.success) { btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713'; }
+    if (d.success) {
+      btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Sent \u2713';
+      const card = btn.closest('.action-card');
+      if (card) { const icon = card.querySelector('.sms-icon'); if (icon) icon.classList.add('sent'); }
+    }
     else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
   } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
 }
@@ -360,33 +385,142 @@ async function moveStage(id, btn) {
   } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
 }
 
+async function moveStageFromCompose(id, btn) {
+  if (btn.classList.contains('sent') || btn.classList.contains('sending')) return;
+  const compose = btn.closest('.compose-move');
+  const select = compose.querySelector('.move-stage-select');
+  const targetStageId = select.value;
+  if (!targetStageId) return;
+  const targetLabel = select.options[select.selectedIndex].text;
+  btn.classList.remove('ready','failed'); btn.classList.add('sending'); btn.textContent = 'Moving...';
+  try {
+    const r = await fetch('/api/move/' + id, {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({targetStageId})});
+    const d = await r.json();
+    if (d.success) {
+      btn.classList.remove('sending'); btn.classList.add('sent'); btn.textContent = 'Moved \u2713';
+      const card = btn.closest('.action-card');
+      if (card) {
+        const icon = card.querySelector('.move-icon'); if (icon) icon.classList.add('sent');
+        const badge = card.querySelector('.card-badges .badge');
+        if (badge) { badge.textContent = targetLabel; badge.className = 'badge move'; }
+      }
+    }
+    else { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = d.error || ''; }
+  } catch(e) { btn.classList.remove('sending'); btn.classList.add('failed'); btn.textContent = 'Failed \u2014 retry'; btn.title = e.message; }
+}
+
+function toggleEmailCompose(btn) {
+  const card = btn.closest('.action-card');
+  const area = card.querySelector('.compose-email');
+  const isOpen = area.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+  closeOtherCompose(card, '.compose-sms', '.sms-icon');
+  closeOtherCompose(card, '.compose-note', '.note-icon');
+  closeOtherCompose(card, '.compose-move', '.move-icon');
+}
+function toggleSmsCompose(btn) {
+  const card = btn.closest('.action-card');
+  const area = card.querySelector('.compose-sms');
+  const isOpen = area.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+  closeOtherCompose(card, '.compose-email', '.email-icon');
+  closeOtherCompose(card, '.compose-note', '.note-icon');
+  closeOtherCompose(card, '.compose-move', '.move-icon');
+}
+function toggleNoteCompose(btn) {
+  const card = btn.closest('.action-card');
+  const area = card.querySelector('.compose-note');
+  const isOpen = area.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+  closeOtherCompose(card, '.compose-email', '.email-icon');
+  closeOtherCompose(card, '.compose-sms', '.sms-icon');
+  closeOtherCompose(card, '.compose-move', '.move-icon');
+}
+function toggleMoveCompose(btn) {
+  const card = btn.closest('.action-card');
+  const area = card.querySelector('.compose-move');
+  const isOpen = area.classList.toggle('open');
+  btn.classList.toggle('active', isOpen);
+  closeOtherCompose(card, '.compose-email', '.email-icon');
+  closeOtherCompose(card, '.compose-sms', '.sms-icon');
+  closeOtherCompose(card, '.compose-note', '.note-icon');
+}
+function closeOtherCompose(card, areaSelector, btnSelector) {
+  const area = card.querySelector(areaSelector);
+  const btn = card.querySelector(btnSelector);
+  if (area) area.classList.remove('open');
+  if (btn) btn.classList.remove('active');
+}
+
+function buildIconButtons(a) {
+  const emailSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 7L2 7"/></svg>';
+  const smsSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  const noteSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+  const moveSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>';
+  const smsDisabled = !a.contactPhone ? ' disabled' : '';
+  return '<button class="icon-btn email-icon" onclick="toggleEmailCompose(this)" title="Send email">' + emailSvg + '</button>' +
+    '<button class="icon-btn sms-icon" onclick="toggleSmsCompose(this)" title="Send text"' + smsDisabled + '>' + smsSvg + '</button>' +
+    '<button class="icon-btn note-icon" onclick="toggleNoteCompose(this)" title="Add note">' + noteSvg + '</button>' +
+    '<button class="icon-btn move-icon" onclick="toggleMoveCompose(this)" title="Move stage">' + moveSvg + '</button>';
+}
+
+const PIPELINE_STAGES = [
+  {id: '29fcf7b0-289c-44a4-ad25-1d1a0aea9063', name: 'New Lead'},
+  {id: '5ee824df-7708-4aba-9177-d5ac02dd6828', name: 'In Progress'},
+  {id: '259ee5f4-5667-4797-948e-f36ec28c70a0', name: 'Quote Sent'},
+  {id: 'accf1eef-aa13-46c3-938d-f3ec6fbe498b', name: 'Needs Attention'},
+  {id: '336a5bee-cad2-400f-83fd-cae1bc837029', name: 'Follow Up'},
+  {id: '1ab155c2-282d-45eb-bd43-1052489eb2a1', name: 'Sale'},
+  {id: '7ec748b8-920d-4bdb-bf09-74dd22d27846', name: 'Cooled Off'},
+  {id: 'b909061c-9141-45d7-b1e2-fd37432c3596', name: 'Unqualified'},
+];
+const STAGE_NAME_TO_ID = Object.fromEntries(PIPELINE_STAGES.map(s => [s.name, s.id]));
+
+function buildComposeAreas(a) {
+  const emailSubject = a.subject || a.noAnswerSubject || '';
+  const emailBody = a.message || a.noAnswerEmail || '';
+  const smsBody = a.smsMessage || a.noAnswerSms || '';
+  const inputStyle = 'width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:0.85rem;';
+  const textareaStyle = 'width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;';
+  const selectStyle = 'width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-size:0.85rem;cursor:pointer;';
+  const currentStageId = STAGE_NAME_TO_ID[a.stage] || '';
+  let stageOptions = '';
+  for (const s of PIPELINE_STAGES) {
+    const selected = s.id === currentStageId ? ' selected' : '';
+    stageOptions += '<option value="' + s.id + '"' + selected + '>' + esc(s.name) + '</option>';
+  }
+  return '<div class="compose-area compose-email">' +
+    '<div class="compose-header"><span class="compose-label">Email</span><button class="send-btn ready" data-action-id="' + a.id + '" onclick="sendEmail(' + a.id + ', this)">Send</button></div>' +
+    '<input class="edit-subject" value="' + esc(emailSubject) + '" placeholder="Subject..." style="' + inputStyle + '">' +
+    '<textarea class="edit-body" rows="5" style="' + textareaStyle + '">' + esc(emailBody) + '</textarea></div>' +
+    '<div class="compose-area compose-sms">' +
+    '<div class="compose-header"><span class="compose-label">Text Message</span><button class="send-btn ready" data-action-id="' + a.id + '_sms" onclick="sendSms(' + a.id + ', this)">Send</button></div>' +
+    '<textarea class="edit-sms" rows="3" style="' + textareaStyle + '">' + esc(smsBody) + '</textarea></div>' +
+    '<div class="compose-area compose-note">' +
+    '<div class="compose-header"><span class="compose-label">Note</span><button class="send-btn ready" onclick="saveCardNote(' + a.id + ', this)">Save</button></div>' +
+    '<textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="' + textareaStyle + '"></textarea></div>' +
+    '<div class="compose-area compose-move">' +
+    '<div class="compose-header"><span class="compose-label">Move Stage</span><button class="send-btn move-btn ready" data-action-id="' + a.id + '_move" onclick="moveStageFromCompose(' + a.id + ', this)">Move</button></div>' +
+    '<select class="move-stage-select" style="' + selectStyle + '">' + stageOptions + '</select></div>';
+}
+
 function buildEmailCard(a) {
   const company = a.contactCompany ? ` — ${esc(a.contactCompany)}` : '';
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges"><span class="badge followup">${esc(a.stage)}</span></div>
-      <div class="card-actions">
-        <button class="send-btn card-send-btn ready" data-action-id="${a.id}" onclick="sendEmail(${a.id}, this)" style="display:none;">Send</button>
+      <div class="card-actions">${buildIconButtons(a)}
         <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
       </div>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company}</div>
-    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
+    <div class="contact-name">${esc(a.contactName)}${company}${a.contactPhone ? ` &mdash; <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;font-weight:400;font-size:0.9rem;">${fmtPhone(a.contactPhone)}</a>` : ''}</div>
     <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
     ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
-    <button class="preview-toggle" onclick="togglePreview(this)">\u25b8 Edit message</button>
-    <div class="msg-preview">
-      <input class="edit-subject" value="${esc(a.subject || '')}" style="width:100%;margin-bottom:6px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px;">
-      <textarea class="edit-body" rows="5" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;">${esc(a.message || '')}</textarea>
-    </div>
+    ${buildComposeAreas(a)}
     <div class="card-inline-actions">
       ${buildConvoHistoryHtml(a.conversationHistory)}
       ${buildNotesHtml(a.notes)}
-      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-      <div class="note-area" style="display:none;">
-        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
-      </div>
     </div>
   </div>`;
 }
@@ -396,23 +530,15 @@ function buildCallCard(a) {
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges"><span class="badge call">${esc(a.stage)}</span></div>
-      <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
+      <div class="card-actions">${buildIconButtons(a)}
+        <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
+      </div>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company}</div>
-    <div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>
+    <div class="contact-name">${esc(a.contactName)}${company} &mdash; <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;font-weight:400;font-size:0.9rem;">${fmtPhone(a.contactPhone)}</a></div>
     <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
     ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
     <div class="call-initial">
       <button class="send-btn ready" onclick="showCallResult(this)">I Called</button>
-    </div>
-    <div class="card-inline-actions">
-      ${buildConvoHistoryHtml(a.conversationHistory)}
-      ${buildNotesHtml(a.notes)}
-      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-      <div class="note-area" style="display:none;">
-        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
-      </div>
     </div>
     <div class="call-result" style="display:none;">
       <button class="send-btn ready" onclick="showAnswered(this, ${a.id})" style="margin-right:8px;">Answered</button>
@@ -435,6 +561,11 @@ function buildCallCard(a) {
         <button class="send-btn ready" data-action-id="${a.id}_email" onclick="sendEmailFromCall(${a.id}, this)" style="margin-top:6px;">Send Email</button>
       </div>
     </div>
+    ${buildComposeAreas(a)}
+    <div class="card-inline-actions">
+      ${buildConvoHistoryHtml(a.conversationHistory)}
+      ${buildNotesHtml(a.notes)}
+    </div>
   </div>`;
 }
 
@@ -443,23 +574,18 @@ function buildMoveCard(a) {
   return `<div class="action-card" data-priority="${esc(a.priority)}" data-action-id="${a.id}">
     <div class="card-top">
       <div class="card-badges"><span class="badge move">${esc(a.stage)}</span></div>
-      <div class="card-actions">
+      <div class="card-actions">${buildIconButtons(a)}
         <button class="send-btn move-btn ready" data-action-id="${a.id}" onclick="moveStage(${a.id}, this)">Move to Cooled Off</button>
         <button class="dismiss-btn" onclick="dismissAction(${a.id}, this)" title="Dismiss">&times;</button>
       </div>
     </div>
-    <div class="contact-name">${esc(a.contactName)}${company}</div>
-    ${a.contactPhone ? `<div class="contact-detail"><a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;">${fmtPhone(a.contactPhone)}</a></div>` : ''}
+    <div class="contact-name">${esc(a.contactName)}${company}${a.contactPhone ? ` &mdash; <a href="tel:${esc(a.contactPhone)}" style="color:var(--accent);text-decoration:none;font-weight:400;font-size:0.9rem;">${fmtPhone(a.contactPhone)}</a>` : ''}</div>
     <div class="context"><strong>Summary:</strong> ${esc(a.context)}</div>
     ${a.recommendation ? `<div class="recommendation"><strong>Recommendation:</strong> ${esc(a.recommendation)}</div>` : ''}
+    ${buildComposeAreas(a)}
     <div class="card-inline-actions">
       ${buildConvoHistoryHtml(a.conversationHistory)}
       ${buildNotesHtml(a.notes)}
-      <button class="note-toggle" onclick="toggleNote(this)">+ Add note</button>
-      <div class="note-area" style="display:none;">
-        <textarea class="card-note" rows="3" placeholder="Add a note about this lead..." style="width:100%;margin-bottom:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:0.85rem;"></textarea>
-        <button class="send-btn ready" onclick="saveCardNote(${a.id}, this)">Save Note</button>
-      </div>
     </div>
   </div>`;
 }
@@ -564,7 +690,20 @@ function renderDashboard(data) {
         if (info.status === 'moved') btn.textContent = 'Moved \u2713';
         else if (info.status === 'noted') btn.textContent = 'Saved \u2713';
         else btn.textContent = 'Sent \u2713';
-        if (btn.classList.contains('card-send-btn')) btn.style.display = '';
+      }
+      // Mark icon buttons as completed
+      const baseId = id.split('_')[0];
+      const card = document.querySelector('.action-card[data-action-id="' + baseId + '"]');
+      if (card) {
+        if (id.endsWith('_sms')) {
+          const icon = card.querySelector('.sms-icon'); if (icon) icon.classList.add('sent');
+        } else if (id.endsWith('_move') || info.status === 'moved') {
+          const icon = card.querySelector('.move-icon'); if (icon) icon.classList.add('sent');
+        } else if (info.status === 'noted') {
+          const icon = card.querySelector('.note-icon'); if (icon) icon.classList.add('sent');
+        } else if (info.status === 'sent') {
+          const icon = card.querySelector('.email-icon'); if (icon) icon.classList.add('sent');
+        }
       }
     }
     updateStats();

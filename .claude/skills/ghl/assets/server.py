@@ -109,7 +109,11 @@ class H(http.server.BaseHTTPRequestHandler):
             action = next((a for a in actions if a["id"] == aid), None)
             if not action:
                 return self._json(404, {"success": False, "error": "Action not found"})
-            body = {"pipelineStageId": action.get("targetStageId", "")}
+            req_body = self._read_body()
+            target_stage = req_body.get("targetStageId") or action.get("targetStageId", "")
+            if not target_stage:
+                return self._json(400, {"success": False, "error": "No target stage specified"})
+            body = {"pipelineStageId": target_stage}
             try:
                 req = urllib.request.Request(
                     f"{GHL_BASE}/opportunities/{action['opportunityId']}",

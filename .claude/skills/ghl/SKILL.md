@@ -361,9 +361,10 @@ The enrichment script (Phase 2.5) has already computed `suggestedAction`, `sugge
 
    **`conversationHistory`** (up to 20 recent messages with actual text):
    - Read the message bodies to understand what was actually discussed — what the customer asked for, what was quoted, what questions are unanswered
-   - Write `context` strings that reference specific things: "Asked about bulk pricing for 200 polos, waiting on size breakdown" instead of "2 days no response — follow up"
+   - Write `context` strings that reference specific things: "Quoted $38.75/unit for 250 PVC patches on Nike Vertical Polo (Feb 19). She needs 250-400 pending head count. Replied Feb 26 — checking with team." instead of "2 days no response — follow up"
+   - Always include: quoted prices, product specs (brand, size, service type), quantities, turnaround commitments, what the customer last said, and what's still pending
    - Flag unanswered questions from either side (customer asked something we didn't answer, or we asked for info they haven't provided)
-   - Keep `context` under ~200 chars but pack it with the most relevant detail from the conversation
+   - Keep `context` under ~250 chars but pack it with the most relevant specifics from the conversation
    - Always include the FULL `conversationHistory` array from enrichment in each action object — do not trim, filter, or curate it. The dashboard shows it in an expandable "Recent messages" section
    - Write a short `recommendation` string (under ~150 chars) — the specific next step Philip should take for this lead. This should be actionable and concrete, e.g. "Call to discuss sizing, then send quote" or "Send follow-up email asking for artwork files". Base it on conversation history, notes, enrichment data, stage, and hint. The dashboard renders this below the Summary line.
 
@@ -391,16 +392,27 @@ Pre-write both a "tried calling" SMS and email for each call action:
 - All emails are editable — pre-write the draft but Phil can modify before sending
 - Professional but warm, South Florida casual tone
 - 3–5 sentences max
-- Always reference their specific project (service type, quantity, what they want)
+- **Ground every email in the conversation history.** Read the full `conversationHistory` and `notes` before drafting. Reference concrete details from what was actually discussed:
+  - Specific prices/quotes already sent (e.g., "$38.75/unit for 250 patches")
+  - Mockups, artwork, or attachments that were shared
+  - Turnaround times or deadlines mentioned (e.g., "4-5 weeks from approval")
+  - What the customer last said they'd do (e.g., "you mentioned checking with your team")
+  - Product specifics: garment brand/model, patch size, print locations, colors
+  - Previous outreach attempts and outcomes (e.g., "tried calling last Monday")
+  - Unanswered questions from either side
 - Ask for exactly what's missing — don't be vague
+- **Never offer to adjust, reduce, or discount pricing** — Philip decides pricing at his discretion. Reference the quoted price as a fact, don't suggest it's negotiable
+- Never write a generic "just checking in" email. Every follow-up must callback at least one specific detail from the conversation so the customer knows you remember their project
 - Sign off as "Philip" or "Phil" (or "The FTL Prints Team" for first contact)
-- Subject line: short, specific, references their project
+- Subject line: short, specific, references their project or the last topic discussed
 
 **SMS drafting rules:**
 - Under 160 characters
 - Very casual, friendly
 - Only for follow-ups, not initial outreach
-- Example: "Hey [name], just checking in on your [project]. Any questions? —Phil"
+- **Must reference a specific detail from the conversation** — a quoted price, a product, a mockup, something they asked about. Never just "checking in on your order"
+- **Never offer to adjust, reduce, or discount pricing** — that's Philip's decision to make manually
+- Example: "Hey Carly, any update from your team on the PVC patch quote? Let me know if you have any questions. —Phil"
 
 **Message decision tree:**
 - Lead replied with a question → answer it + ask for next needed info
