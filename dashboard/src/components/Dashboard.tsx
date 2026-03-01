@@ -809,8 +809,6 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [data, setData] = useState<DashboardData | null>(initialData);
   const [sentStatus, setSentStatus] = useState<SentStatus>({});
   const [dismissed, setDismissed] = useState<Set<number>>(new Set());
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshStep, setRefreshStep] = useState("");
 
   // Load sent status on mount
   useEffect(() => {
@@ -838,60 +836,6 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     } catch { /* ignore */ }
   }, []);
 
-  async function handleRefresh() {
-    setRefreshing(true);
-    try {
-      // Step 1: Opportunities
-      setRefreshStep("Fetching pipeline...");
-      const oppResp = await fetch("/api/pipeline?step=opportunities", { method: "POST" });
-      const oppData = await oppResp.json();
-      if (!oppResp.ok) { setRefreshStep(`Error: ${oppData.error}`); setRefreshing(false); return; }
-
-      // Step 2: Conversations (batched)
-      let offset = 0;
-      let convoDone = false;
-      let convoTotal = oppData.activeLeads || 0;
-      while (!convoDone) {
-        setRefreshStep(`Fetching conversations... (${offset}/${convoTotal})`);
-        const convoResp = await fetch(`/api/pipeline?step=conversations&offset=${offset}`);
-        const convoData = await convoResp.json();
-        if (!convoResp.ok) { setRefreshStep(`Error: ${convoData.error}`); setRefreshing(false); return; }
-        convoTotal = convoData.total;
-        convoDone = convoData.done;
-        offset = convoData.nextOffset ?? offset;
-      }
-
-      // Step 3: Enrich
-      setRefreshStep("Enriching leads...");
-      const enrichResp = await fetch("/api/pipeline?step=enrich");
-      if (!enrichResp.ok) { const d = await enrichResp.json(); setRefreshStep(`Error: ${d.error}`); setRefreshing(false); return; }
-
-      // Step 4: Recommend (batched)
-      let recOffset = 0;
-      let recDone = false;
-      while (!recDone) {
-        setRefreshStep(`Generating recommendations... (${recOffset}/${convoTotal})`);
-        const recResp = await fetch(`/api/pipeline?step=recommend&offset=${recOffset}`);
-        const recData = await recResp.json();
-        if (!recResp.ok) { setRefreshStep(`Error: ${recData.error}`); setRefreshing(false); return; }
-        recDone = recData.done;
-        recOffset = recData.nextOffset ?? recOffset;
-      }
-
-      // Done — reload dashboard data
-      setRefreshStep("Loading dashboard...");
-      const actionsResp = await fetch("/api/actions");
-      const newData = await actionsResp.json();
-      setData(newData);
-      setSentStatus({});
-      setDismissed(new Set());
-    } catch (err) {
-      setRefreshStep(`Error: ${err}`);
-    }
-    setRefreshing(false);
-    setRefreshStep("");
-  }
-
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
@@ -902,24 +846,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       <div style={styles.root}>
         <h1 style={{ fontSize: "1.5rem", marginBottom: 4 }}>FTL Prints — Action Dashboard</h1>
         <div style={styles.loading}>
-          No pipeline data yet. Cron runs at 8:00 AM ET weekdays.
-          <div style={{ marginTop: 16 }}>
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              style={{
-                padding: "10px 24px",
-                background: refreshing ? "#334155" : "#38bdf8",
-                color: refreshing ? "#94a3b8" : "#0f172a",
-                border: "none",
-                borderRadius: 6,
-                fontWeight: 600,
-                cursor: refreshing ? "wait" : "pointer",
-              }}
-            >
-              {refreshing ? (refreshStep || "Refreshing...") : "Refresh Now"}
-            </button>
-          </div>
+          No pipeline data yet. Pipeline runs at 8:00 AM ET weekdays.
         </div>
       </div>
     );
@@ -967,37 +894,20 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
             )}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            style={{
-              padding: "6px 14px",
-              background: refreshing ? "#334155" : "#1e293b",
-              color: "#94a3b8",
-              border: "1px solid #334155",
-              borderRadius: 6,
-              fontSize: "0.8rem",
-              cursor: refreshing ? "wait" : "pointer",
-            }}
-          >
-            {refreshing ? (refreshStep || "...") : "Refresh"}
-          </button>
-          <button
-            onClick={handleLogout}
-            style={{
-              padding: "6px 14px",
-              background: "#1e293b",
-              color: "#94a3b8",
-              border: "1px solid #334155",
-              borderRadius: 6,
-              fontSize: "0.8rem",
-              cursor: "pointer",
-            }}
-          >
-            Logout
-          </button>
-        </div>
+        <button
+          onClick={handleLogout}
+          style={{
+            padding: "6px 14px",
+            background: "#1e293b",
+            color: "#94a3b8",
+            border: "1px solid #334155",
+            borderRadius: 6,
+            fontSize: "0.8rem",
+            cursor: "pointer",
+          }}
+        >
+          Logout
+        </button>
       </div>
 
       {/* Stats */}

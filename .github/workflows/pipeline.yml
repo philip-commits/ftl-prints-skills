@@ -1,0 +1,23 @@
+name: Daily Pipeline
+on:
+  schedule:
+    - cron: '0 13 * * 1-5' # 8 AM ET (UTC-5), weekdays only
+  workflow_dispatch: {} # manual trigger button in GitHub UI
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npx tsx scripts/run-pipeline.ts
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          GHL_PIT_TOKEN: ${{ secrets.GHL_PIT_TOKEN }}
