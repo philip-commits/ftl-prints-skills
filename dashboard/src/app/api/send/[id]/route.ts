@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readDashboardData } from "@/lib/blob/store";
 import { readSentStatus, writeSentStatus } from "@/lib/blob/store";
 import { ghlFetch } from "@/lib/ghl/client";
+import { STAGE_IDS } from "@/lib/constants";
 
 export async function POST(
   request: Request,
@@ -43,6 +44,19 @@ export async function POST(
       method: "POST",
       body,
     });
+
+    // Auto-move New Lead → In Progress after first outreach
+    if (action.stage === "New Lead" && action.opportunityId) {
+      try {
+        await ghlFetch({
+          path: `/opportunities/${action.opportunityId}`,
+          method: "PUT",
+          body: { pipelineStageId: STAGE_IDS["In Progress"] },
+        });
+      } catch {
+        // Non-fatal — message was sent, stage move can be done manually
+      }
+    }
 
     const sent = await readSentStatus();
     sent[rawId] = { status: "sent", ts: Date.now() };

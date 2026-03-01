@@ -6,9 +6,8 @@ import type { DashboardData, ActionItem, SentStatus } from "@/lib/ghl/types";
 const PIPELINE_STAGES = [
   { id: "29fcf7b0-289c-44a4-ad25-1d1a0aea9063", name: "New Lead" },
   { id: "5ee824df-7708-4aba-9177-d5ac02dd6828", name: "In Progress" },
-  { id: "259ee5f4-5667-4797-948e-f36ec28c70a0", name: "Quote Sent" },
-  { id: "accf1eef-aa13-46c3-938d-f3ec6fbe498b", name: "Needs Attention" },
-  { id: "336a5bee-cad2-400f-83fd-cae1bc837029", name: "Follow Up" },
+  { id: "336a5bee-cad2-400f-83fd-cae1bc837029", name: "Quote Sent" },
+  { id: "259ee5f4-5667-4797-948e-f36ec28c70a0", name: "Invoice Sent" },
   { id: "1ab155c2-282d-45eb-bd43-1052489eb2a1", name: "Sale" },
   { id: "7ec748b8-920d-4bdb-bf09-74dd22d27846", name: "Cooled Off" },
   { id: "b909061c-9141-45d7-b1e2-fd37432c3596", name: "Unqualified" },
@@ -64,9 +63,8 @@ const styles = {
 const BADGE_COLORS: Record<string, { bg: string; color: string }> = {
   "New Lead": { bg: "#450a0a", color: "#ef4444" },
   "In Progress": { bg: "#422006", color: "#eab308" },
-  "Quote Sent": { bg: "#422006", color: "#eab308" },
-  "Needs Attention": { bg: "#450a0a", color: "#ef4444" },
-  "Follow Up": { bg: "#422006", color: "#eab308" },
+  "Quote Sent": { bg: "#1e3a5f", color: "#60a5fa" },
+  "Invoice Sent": { bg: "#052e16", color: "#22c55e" },
   Sale: { bg: "#052e16", color: "#22c55e" },
   "Cooled Off": { bg: "#1e1b4b", color: "#818cf8" },
   Unqualified: { bg: "#334155", color: "#94a3b8" },
@@ -886,12 +884,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
         <div>
           <h1 style={{ fontSize: "1.5rem", marginBottom: 4 }}>FTL Prints — Action Dashboard</h1>
           <div style={styles.dateLine}>
-            {today} — Fort Lauderdale Screen Printing
-            {data.generatedAt && (
-              <span style={{ marginLeft: 12, fontSize: "0.8rem" }}>
-                Updated {new Date(data.generatedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-              </span>
-            )}
+            Updated: {data.generatedAt ? new Date(data.generatedAt).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" }) : today}
           </div>
         </div>
         <button

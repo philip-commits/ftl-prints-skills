@@ -3,17 +3,9 @@ import type { ParsedLead, ConversationMeta, EnrichedLead, NoteEntry, MessageEntr
 
 const INFO_FIELDS = ["artwork", "sizes", "quantity", "project_details"];
 
-const COOLDOWN_MULTI_CHANNEL = 3;
-const COOLDOWN_CALL = 3;
-const COOLDOWN_EMAIL = 2;
-const COOLDOWN_BYPASS_ACTIONS = new Set(["reply", "outreach", "move"]);
-
-const BUDGET_TIERS: Record<string, string> = {
-  "$0 - $149": "low",
-  "$150 - $499": "standard",
-  "$500 - $999": "standard",
-  "$1,000+": "high",
-};
+// Cooldown: don't suggest contact if we just reached out
+const COOLDOWN_DAYS = 1; // contacted yesterday or today → suppress
+const COOLDOWN_BYPASS_ACTIONS = new Set(["reply", "move"]);
 
 function isInternational(phone: string): boolean {
   if (!phone) return false;
@@ -60,14 +52,6 @@ function parseTimestamp(ts: string | number | null | undefined): Date | null {
   }
 }
 
-function getValueTier(lead: ParsedLead): string {
-  const budget = lead.budget || "";
-  if (budget in BUDGET_TIERS) return BUDGET_TIERS[budget];
-  const mv = lead.monetaryValue || 0;
-  if (mv >= 1000) return "high";
-  if (mv >= 150) return "standard";
-  return "low";
-}
 
 function getMissingInfo(lead: ParsedLead): string[] {
   const missing: string[] = [];
@@ -179,8 +163,6 @@ function decideAction(lead: EnrichedLead): ActionResult {
   const stage = lead.stage || "";
   const needsReply = lead.needsReply;
   const hasManual = lead.hasManualOutreach;
-  const isIntl = lead.isInternational;
-  const tier = getValueTier(lead);
   const outboundCount = lead.outboundCount || 0;
 
   let bdays = lead.daysSinceLastContact;
@@ -188,118 +170,41 @@ function decideAction(lead: EnrichedLead): ActionResult {
     bdays = approxBusinessDays(lead.days_in_stage);
   }
 
-  const minAttempts = tier === "high" ? 4 : 3;
-
-  const thresholds: Record<string, Record<string, number | null>> = {
-    high: { call: 1, followup: 3, final: 6, hv_extra: 10, move: 14 },
-    standard: { call: 1, followup: 3, final: 6, hv_extra: null, move: 10 },
-    low: { call: 1, followup: 2, final: 5, hv_extra: null, move: 7 },
-  };
-
-  let t: Record<string, number | null>;
-  if (stage === "Quote Sent") {
-    t = { call: 1, followup: 2, final: 5, hv_extra: null, move: 7 };
-  } else {
-    t = thresholds[tier] || thresholds.standard;
-  }
-
-  // 1. Needs reply
+  // 1. Needs reply — inbound message waiting
   if (needsReply) return ["reply", "high", "Inbound message waiting — reply needed"];
 
-  // 2. New Lead or no manual outreach
+  // 2. New Lead or no manual outreach — first contact needed
   if (stage === "New Lead" || !hasManual) {
     const label = stage === "New Lead" ? "New lead" : "No manual outreach yet";
-    return ["outreach", "high", `${label} — send personalized welcome`];
+    return ["outreach", "high", `${label} — send text + email`];
   }
 
-  // 3. Needs Attention
-  if (stage === "Needs Attention") {
-    if (bdays >= t.move! && outboundCount >= minAttempts)
-      return ["move", "high", `Needs Attention but ${bdays} bdays, ${outboundCount} attempts — consider Cooled Off`];
-    if (isIntl) return ["follow_up_email", "high", "Flagged for attention — international, email only"];
-    return ["call", "high", "Flagged for attention — call or email"];
+  // 3. New Lead / In Progress — fixed follow-up cadence
+  if (stage === "In Progress") {
+    if (bdays >= 8 && outboundCount >= 3)
+      return ["move", "info", `${bdays} bdays, ${outboundCount} attempts, no response — recommend Cooled Off`];
+    if (bdays >= 5)
+      return ["follow_up", "high", `${bdays} bdays no response, ${outboundCount} attempts — text + call + email`];
+    if (bdays >= 2)
+      return ["follow_up", "high", `${bdays} bdays no response — text + call + email`];
+    return ["none", "none", "Contacted recently, waiting for response"];
   }
 
-  // 4. Quote Sent
-  if (stage === "Quote Sent") {
-    if (bdays >= t.move! && outboundCount >= minAttempts)
-      return ["move", "info", `${bdays} bdays since quote sent, ${outboundCount} attempts, no response — move to Cooled Off`];
-    if (bdays >= t.move!)
-      return ["follow_up_email", "medium", `${bdays} bdays since quote sent but only ${outboundCount}/${minAttempts} attempts — follow up before closing`];
-    if (bdays >= t.final!)
-      return ["final_attempt_email", "medium", `${bdays} bdays since quote sent — final follow-up before closing`];
-    if (bdays >= t.followup!)
-      return ["follow_up_email", "medium", `${bdays} bdays since quote sent — check if they have questions`];
-    if (bdays >= t.call!) {
-      if (isIntl) return ["follow_up_email", "medium", `${bdays} bday(s) since quote sent, international — email follow-up`];
-      return ["call", "high", `${bdays} bday(s) since quote sent — call to discuss`];
-    }
-    return ["none", "none", "Quote sent recently, waiting for response"];
+  // 4. Quote Sent / Invoice Sent — Claude decides based on conversation context
+  if (stage === "Quote Sent" || stage === "Invoice Sent") {
+    return ["follow_up", "high", `${stage} — ${bdays} bdays since last contact, ${outboundCount} outbound messages. Claude to decide action based on conversation context.`];
   }
 
-  // 5. High-value extra attempt
-  if (tier === "high" && t.hv_extra !== null && bdays >= t.hv_extra && bdays < t.move!)
-    return ["high_value_followup", "high", `High-value lead at ${bdays} bdays — extra attempt before closing out`];
-
-  // 6. Move threshold
-  if (bdays >= t.move! && outboundCount >= minAttempts)
-    return ["move", "info", `${bdays} bdays in ${stage}, ${outboundCount} attempts, no response — move to Cooled Off`];
-  if (bdays >= t.move!)
-    return ["follow_up_email", "medium", `${bdays} bdays in ${stage} but only ${outboundCount}/${minAttempts} attempts — follow up before closing`];
-
-  // 7. Final attempt
-  if (bdays >= t.final!)
-    return ["final_attempt_email", "medium", `${bdays} bdays no response — final follow-up before moving to Cooled Off`];
-
-  // 8. Follow-up email
-  if (bdays >= t.followup!)
-    return ["follow_up_email", "medium", `${bdays} bdays no response — follow-up email`];
-
-  // 9. First follow-up (1+ bday)
-  if (bdays >= t.call!) {
-    if (isIntl) return ["follow_up_email", "medium", `${bdays} bday(s) no response, international — email only`];
-    return ["call", "high", `${bdays} bday(s) no response, domestic — call them`];
-  }
-
-  // 10. Default
-  return ["none", "none", "Contacted recently, waiting for response"];
+  // 5. Default — active stage, needs follow-up
+  return ["follow_up", "medium", `${stage} — ${bdays} bdays since last contact`];
 }
 
 function applyCooldown(lead: EnrichedLead, action: string, priority: string, hint: string): ActionResult {
   if (COOLDOWN_BYPASS_ACTIONS.has(action)) return [action, priority, hint];
 
-  const daysCall = lead.daysSinceLastCall;
-  const daysSms = lead.daysSinceLastSms;
-  const daysEmail = lead.daysSinceLastEmail;
-
-  // Multi-channel full press detection
-  if (daysCall !== null && (daysSms !== null || daysEmail !== null)) {
-    const others = [daysSms, daysEmail].filter((d): d is number => d !== null);
-    const other = Math.min(...others);
-    if (Math.abs(daysCall - other) <= 1) {
-      const mostRecent = Math.min(daysCall, other);
-      if (mostRecent < COOLDOWN_MULTI_CHANNEL) {
-        return ["none", "none",
-          `Cooldown: full press ${mostRecent} bday(s) ago, wait ${COOLDOWN_MULTI_CHANNEL - mostRecent} more bday(s)`];
-      }
-    }
-  }
-
-  // Call cooldown
-  const isCallAction = action === "call" || action === "high_value_followup";
-  if (isCallAction && daysCall !== null && daysCall < COOLDOWN_CALL) {
-    if (daysEmail === null || daysEmail >= COOLDOWN_EMAIL) {
-      return ["follow_up_email", priority, `Cooldown: called ${daysCall} bday(s) ago — email instead`];
-    }
-    return ["none", "none",
-      `Cooldown: called ${daysCall} bday(s) ago, emailed ${daysEmail} bday(s) ago — wait`];
-  }
-
-  // Email cooldown
-  const isEmailAction = action === "follow_up_email" || action === "final_attempt_email";
-  if (isEmailAction && daysEmail !== null && daysEmail < COOLDOWN_EMAIL) {
-    return ["none", "none",
-      `Cooldown: emailed ${daysEmail} bday(s) ago, wait ${COOLDOWN_EMAIL - daysEmail} more bday(s)`];
+  const bdays = lead.daysSinceLastContact;
+  if (bdays !== null && bdays < COOLDOWN_DAYS) {
+    return ["none", "none", `Cooldown: contacted ${bdays} bday(s) ago, waiting for response`];
   }
 
   return [action, priority, hint];

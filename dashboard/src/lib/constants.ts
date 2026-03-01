@@ -8,9 +8,8 @@ export const MAX_CONCURRENT = 3;
 export const ACTIVE_STAGES: Record<string, string> = {
   "29fcf7b0-289c-44a4-ad25-1d1a0aea9063": "New Lead",
   "5ee824df-7708-4aba-9177-d5ac02dd6828": "In Progress",
-  "259ee5f4-5667-4797-948e-f36ec28c70a0": "Quote Sent",
-  "accf1eef-aa13-46c3-938d-f3ec6fbe498b": "Needs Attention",
-  "336a5bee-cad2-400f-83fd-cae1bc837029": "Follow Up",
+  "336a5bee-cad2-400f-83fd-cae1bc837029": "Quote Sent",
+  "259ee5f4-5667-4797-948e-f36ec28c70a0": "Invoice Sent",
 };
 
 export const INACTIVE_STAGES: Record<string, string> = {
@@ -22,9 +21,8 @@ export const INACTIVE_STAGES: Record<string, string> = {
 export const STAGE_IDS: Record<string, string> = {
   "New Lead": "29fcf7b0-289c-44a4-ad25-1d1a0aea9063",
   "In Progress": "5ee824df-7708-4aba-9177-d5ac02dd6828",
-  "Quote Sent": "259ee5f4-5667-4797-948e-f36ec28c70a0",
-  "Needs Attention": "accf1eef-aa13-46c3-938d-f3ec6fbe498b",
-  "Follow Up": "336a5bee-cad2-400f-83fd-cae1bc837029",
+  "Quote Sent": "336a5bee-cad2-400f-83fd-cae1bc837029",
+  "Invoice Sent": "259ee5f4-5667-4797-948e-f36ec28c70a0",
   "Sale": "1ab155c2-282d-45eb-bd43-1052489eb2a1",
   "Cooled Off": "7ec748b8-920d-4bdb-bf09-74dd22d27846",
   "Unqualified": "b909061c-9141-45d7-b1e2-fd37432c3596",
