@@ -810,6 +810,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
   const [sentStatus, setSentStatus] = useState<SentStatus>({});
   const [dismissed, setDismissed] = useState<Set<number>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshStep, setRefreshStep] = useState("");
 
   // Load sent status on mount
   useEffect(() => {
@@ -837,19 +838,59 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     } catch { /* ignore */ }
   }, []);
 
+  const STEP_LABELS: Record<string, string> = {
+    opportunities: "Fetching pipeline...",
+    conversations: "Fetching conversations...",
+    enrich: "Enriching leads...",
+    recommend: "Generating recommendations...",
+  };
+
   async function handleRefresh() {
     setRefreshing(true);
+    setRefreshStep("Starting...");
     try {
       const r = await fetch("/api/refresh", { method: "POST" });
-      if (r.ok) {
-        const actionsResp = await fetch("/api/actions");
-        const newData = await actionsResp.json();
-        setData(newData);
-        setSentStatus({});
-        setDismissed(new Set());
+      if (!r.ok) {
+        setRefreshStep("Failed to start");
+        setRefreshing(false);
+        return;
+      }
+
+      // Poll pipeline status every 2s
+      const poll = async (): Promise<boolean> => {
+        try {
+          const resp = await fetch("/api/pipeline?step=status");
+          const status = await resp.json();
+          if (status.status === "complete") {
+            setRefreshStep("Loading dashboard...");
+            const actionsResp = await fetch("/api/actions");
+            const newData = await actionsResp.json();
+            setData(newData);
+            setSentStatus({});
+            setDismissed(new Set());
+            return true;
+          }
+          if (status.status === "error") {
+            setRefreshStep(`Error: ${status.error || "unknown"}`);
+            return true;
+          }
+          setRefreshStep(STEP_LABELS[status.step] || status.step || "Running...");
+          return false;
+        } catch {
+          return false;
+        }
+      };
+
+      // Poll until complete or error (max 120s)
+      const maxAttempts = 60;
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const done = await poll();
+        if (done) break;
       }
     } catch { /* ignore */ }
     setRefreshing(false);
+    setRefreshStep("");
   }
 
   async function handleLogout() {
@@ -870,14 +911,14 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
               style={{
                 padding: "10px 24px",
                 background: refreshing ? "#334155" : "#38bdf8",
-                color: "#0f172a",
+                color: refreshing ? "#94a3b8" : "#0f172a",
                 border: "none",
                 borderRadius: 6,
                 fontWeight: 600,
                 cursor: refreshing ? "wait" : "pointer",
               }}
             >
-              {refreshing ? "Refreshing..." : "Refresh Now"}
+              {refreshing ? (refreshStep || "Refreshing...") : "Refresh Now"}
             </button>
           </div>
         </div>
@@ -941,7 +982,7 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
               cursor: refreshing ? "wait" : "pointer",
             }}
           >
-            {refreshing ? "..." : "Refresh"}
+            {refreshing ? (refreshStep || "...") : "Refresh"}
           </button>
           <button
             onClick={handleLogout}

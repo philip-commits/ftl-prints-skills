@@ -1,34 +1,15 @@
 import { NextResponse } from "next/server";
-import { fetchOpportunities } from "@/lib/ghl/pipeline";
-import { fetchAllConversations } from "@/lib/ghl/conversations";
-import { enrichLeads } from "@/lib/ghl/enrich";
-import { generateRecommendations } from "@/lib/claude/recommendations";
-import { writeDashboardData, writeSentStatus } from "@/lib/blob/store";
 
-export const maxDuration = 120;
-
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const { active, inactiveSummary } = await fetchOpportunities();
-    const conversations = await fetchAllConversations(active);
-    const enriched = enrichLeads(active, conversations);
-    const { actions, noAction } = await generateRecommendations(enriched, inactiveSummary);
-
-    const dashboardData = {
-      actions,
-      noAction,
-      inactiveSummary,
-      generatedAt: new Date().toISOString(),
-    };
-    await writeDashboardData(dashboardData);
-    await writeSentStatus({});
-
-    return NextResponse.json({
-      success: true,
-      actions: actions.length,
-      generatedAt: dashboardData.generatedAt,
-    });
+    console.log("[refresh] Kicking off pipeline...");
+    const pipelineUrl = new URL("/api/pipeline?step=opportunities", request.url);
+    const resp = await fetch(pipelineUrl.toString(), { method: "POST" });
+    const data = await resp.json();
+    console.log("[refresh] Pipeline started:", data);
+    return NextResponse.json({ success: true, pipeline: data });
   } catch (error) {
+    console.error("[refresh] Failed to start pipeline:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
