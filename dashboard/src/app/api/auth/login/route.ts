@@ -1,20 +1,33 @@
 import { NextResponse } from "next/server";
 import { createSession, getSessionCookieName } from "@/lib/auth/session";
 
+function validateCredentials(username: string, password: string): boolean {
+  // Multi-user: DASHBOARD_USERS=phil:pass1,albert:pass2
+  const usersEnv = process.env.DASHBOARD_USERS;
+  if (usersEnv) {
+    return usersEnv.split(",").some((entry) => {
+      const [u, p] = entry.split(":");
+      return u === username && p === password;
+    });
+  }
+  // Single-user fallback
+  return (
+    username === process.env.DASHBOARD_USERNAME &&
+    password === process.env.DASHBOARD_PASSWORD
+  );
+}
+
 export async function POST(request: Request) {
   const { username, password } = await request.json();
 
-  const validUser = process.env.DASHBOARD_USERNAME;
-  const validPass = process.env.DASHBOARD_PASSWORD;
-
-  if (!validUser || !validPass) {
+  if (!process.env.DASHBOARD_USERS && !process.env.DASHBOARD_USERNAME) {
     return NextResponse.json(
       { error: "Auth not configured" },
       { status: 500 },
     );
   }
 
-  if (username !== validUser || password !== validPass) {
+  if (!validateCredentials(username, password)) {
     return NextResponse.json(
       { error: "Invalid credentials" },
       { status: 401 },
