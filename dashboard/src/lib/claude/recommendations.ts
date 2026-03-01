@@ -92,7 +92,7 @@ Inactive summary: ${JSON.stringify(inactiveSummary)}
 Leads:
 ${JSON.stringify(leadsData, null, 2)}
 
-Return valid JSON with "actions" and "noAction" arrays. Action IDs must be sequential starting at 1. Do NOT include conversationHistory or notes in the output — they will be attached automatically.`,
+Return valid JSON with "actions" and "noAction" arrays. Action IDs must be sequential starting at 1. For each action, only include contactId as the identifier — do NOT include contactName, contactEmail, contactPhone, opportunityId, stage, conversationHistory, or notes. Those fields will be attached automatically.`,
       },
     ],
   });
@@ -113,10 +113,15 @@ Return valid JSON with "actions" and "noAction" arrays. Action IDs must be seque
     noAction: NoActionItem[];
   };
 
-  // Ensure conversation history and notes are preserved from enriched data
+  // Reattach contact metadata, conversation history, and notes from enriched data
   for (const action of result.actions) {
     const lead = leads.find((l) => l.contactId === action.contactId);
     if (lead) {
+      action.contactName = lead.name;
+      action.contactEmail = lead.email;
+      action.contactPhone = lead.phone;
+      action.opportunityId = lead.id;
+      action.stage = lead.stage;
       action.conversationHistory = lead.conversationHistory;
       action.notes = lead.notes;
       action.international = lead.isInternational;
