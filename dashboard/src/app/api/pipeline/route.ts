@@ -14,12 +14,14 @@ import {
   readPipelineConversations,
   writePipelineEnriched,
   readPipelineEnriched,
+  readPipelineRecommendations,
+  writePipelineRecommendations,
 } from "@/lib/blob/store";
-import type { ParsedLead } from "@/lib/ghl/types";
 
 export const maxDuration = 60;
 
 const CONVO_BATCH_SIZE = 3;
+const RECOMMEND_BATCH_SIZE = 6;
 
 // --- GET: status, conversations, enrich, recommend ---
 export async function GET(request: Request) {
@@ -112,37 +114,65 @@ export async function GET(request: Request) {
   }
 
   if (step === "recommend") {
+    const offset = parseInt(searchParams.get("offset") || "0", 10);
     try {
+      const oppData = await readPipelineOpportunities();
+      const enriched = await readPipelineEnriched();
+      if (!oppData || !enriched) throw new Error("Missing opportunity or enriched data");
+
+      const total = enriched.length;
+      const batch = enriched.slice(offset, offset + RECOMMEND_BATCH_SIZE);
+
       await writePipelineStatus({
         status: "running",
         step: "recommend",
         startedAt: new Date().toISOString(),
       });
 
-      const oppData = await readPipelineOpportunities();
-      const enriched = await readPipelineEnriched();
-      if (!oppData || !enriched) throw new Error("Missing opportunity or enriched data");
+      console.log(`[pipeline:recommend] Batch ${offset}–${offset + batch.length} of ${total}`);
+      const { actions, noAction } = await generateRecommendations(batch, oppData.inactiveSummary);
 
-      console.log("[pipeline:recommend] Generating Claude recommendations...");
-      const { actions, noAction } = await generateRecommendations(enriched, oppData.inactiveSummary);
-      console.log(`[pipeline:recommend] ${actions.length} actions, ${noAction.length} no-action`);
+      // Merge with previous batches
+      const existing = offset > 0 ? (await readPipelineRecommendations()) || { actions: [], noAction: [] } : { actions: [], noAction: [] };
+      const mergedActions = [...existing.actions, ...actions];
+      const mergedNoAction = [...existing.noAction, ...noAction];
 
-      const dashboardData = {
-        actions,
-        noAction,
-        inactiveSummary: oppData.inactiveSummary,
-        generatedAt: new Date().toISOString(),
-      };
-      await writeDashboardData(dashboardData);
-      await writeSentStatus({});
+      // Re-number action IDs sequentially
+      mergedActions.forEach((a, i) => { a.id = i + 1; });
 
-      await writePipelineStatus({
-        status: "complete",
+      const nextOffset = offset + RECOMMEND_BATCH_SIZE;
+      const done = nextOffset >= total;
+
+      if (done) {
+        // Final batch — write dashboard data
+        console.log(`[pipeline:recommend] Done: ${mergedActions.length} actions, ${mergedNoAction.length} no-action`);
+        const dashboardData = {
+          actions: mergedActions,
+          noAction: mergedNoAction,
+          inactiveSummary: oppData.inactiveSummary,
+          generatedAt: new Date().toISOString(),
+        };
+        await writeDashboardData(dashboardData);
+        await writeSentStatus({});
+        await writePipelineStatus({
+          status: "complete",
+          step: "recommend",
+          startedAt: new Date().toISOString(),
+        });
+      } else {
+        // Save partial results
+        await writePipelineRecommendations({ actions: mergedActions, noAction: mergedNoAction });
+      }
+
+      return NextResponse.json({
+        success: true,
         step: "recommend",
-        startedAt: new Date().toISOString(),
+        offset,
+        batchSize: batch.length,
+        total,
+        done,
+        nextOffset: done ? null : nextOffset,
       });
-
-      return NextResponse.json({ success: true, step: "recommend" });
     } catch (error) {
       console.error("[pipeline:recommend]", error);
       await writePipelineStatus({

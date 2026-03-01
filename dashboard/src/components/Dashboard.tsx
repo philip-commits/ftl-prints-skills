@@ -866,10 +866,17 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
       const enrichResp = await fetch("/api/pipeline?step=enrich");
       if (!enrichResp.ok) { const d = await enrichResp.json(); setRefreshStep(`Error: ${d.error}`); setRefreshing(false); return; }
 
-      // Step 4: Recommend
-      setRefreshStep("Generating recommendations...");
-      const recResp = await fetch("/api/pipeline?step=recommend");
-      if (!recResp.ok) { const d = await recResp.json(); setRefreshStep(`Error: ${d.error}`); setRefreshing(false); return; }
+      // Step 4: Recommend (batched)
+      let recOffset = 0;
+      let recDone = false;
+      while (!recDone) {
+        setRefreshStep(`Generating recommendations... (${recOffset}/${convoTotal})`);
+        const recResp = await fetch(`/api/pipeline?step=recommend&offset=${recOffset}`);
+        const recData = await recResp.json();
+        if (!recResp.ok) { setRefreshStep(`Error: ${recData.error}`); setRefreshing(false); return; }
+        recDone = recData.done;
+        recOffset = recData.nextOffset ?? recOffset;
+      }
 
       // Done — reload dashboard data
       setRefreshStep("Loading dashboard...");

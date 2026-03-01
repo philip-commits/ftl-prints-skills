@@ -39,10 +39,17 @@ export async function GET(request: Request) {
     if (!enrichResp.ok) throw new Error(`enrich failed: ${enrichData.error}`);
     console.log("[cron] Enrichment complete");
 
-    // Step 4: Recommend
-    const recResp = await fetch(`${baseUrl}/api/pipeline?step=recommend`);
-    const recData = await recResp.json();
-    if (!recResp.ok) throw new Error(`recommend failed: ${recData.error}`);
+    // Step 4: Recommend (batched)
+    let recOffset = 0;
+    let recDone = false;
+    while (!recDone) {
+      const recResp = await fetch(`${baseUrl}/api/pipeline?step=recommend&offset=${recOffset}`);
+      const recData = await recResp.json();
+      if (!recResp.ok) throw new Error(`recommend failed: ${recData.error}`);
+      console.log(`[cron] Recommend batch ${recOffset}: ${recData.batchSize} leads`);
+      recDone = recData.done;
+      recOffset = recData.nextOffset ?? recOffset;
+    }
     console.log("[cron] Recommendations complete");
 
     return NextResponse.json({ success: true });

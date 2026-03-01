@@ -1,5 +1,5 @@
 import { put, head } from "@vercel/blob";
-import type { DashboardData, SentStatus, ParsedLead, ConversationMeta, EnrichedLead } from "../ghl/types";
+import type { DashboardData, SentStatus, ParsedLead, ConversationMeta, EnrichedLead, ActionItem, NoActionItem } from "../ghl/types";
 
 const DASHBOARD_KEY = "dashboard-data.json";
 const SENT_STATUS_KEY = "sent-status.json";
@@ -119,6 +119,30 @@ export async function readPipelineEnriched(): Promise<EnrichedLead[] | null> {
 
 export async function writePipelineEnriched(data: EnrichedLead[]): Promise<void> {
   await put(PIPELINE_ENRICHED_KEY, JSON.stringify(data), {
+    access: "public",
+    addRandomSuffix: false,
+  });
+}
+
+const PIPELINE_RECOMMENDATIONS_KEY = "pipeline-recommendations.json";
+
+export interface PartialRecommendations {
+  actions: ActionItem[];
+  noAction: NoActionItem[];
+}
+
+export async function readPipelineRecommendations(): Promise<PartialRecommendations | null> {
+  try {
+    const blob = await head(PIPELINE_RECOMMENDATIONS_KEY);
+    const resp = await fetch(blob.url);
+    return (await resp.json()) as PartialRecommendations;
+  } catch {
+    return null;
+  }
+}
+
+export async function writePipelineRecommendations(data: PartialRecommendations): Promise<void> {
+  await put(PIPELINE_RECOMMENDATIONS_KEY, JSON.stringify(data), {
     access: "public",
     addRandomSuffix: false,
   });
