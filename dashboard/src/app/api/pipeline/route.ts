@@ -18,15 +18,17 @@ import {
 
 export const maxDuration = 60;
 
-function selfUrl(request: Request, step: string): string {
+const CONVO_BATCH_SIZE = 5;
+
+function chainNext(request: Request, step: string, extraParams?: Record<string, string>) {
   const url = new URL(request.url);
   url.searchParams.set("step", step);
-  return url.toString();
-}
-
-function chainNext(request: Request, step: string) {
-  const url = selfUrl(request, step);
-  fetch(url, { signal: AbortSignal.timeout(500) }).catch(() => {});
+  if (extraParams) {
+    for (const [k, v] of Object.entries(extraParams)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  fetch(url.toString(), { signal: AbortSignal.timeout(500) }).catch(() => {});
 }
 
 // --- GET: status, conversations, enrich, recommend ---
@@ -40,24 +42,40 @@ export async function GET(request: Request) {
   }
 
   if (step === "conversations") {
+    const offset = parseInt(searchParams.get("offset") || "0", 10);
     try {
+      const oppData = await readPipelineOpportunities();
+      if (!oppData) throw new Error("No opportunity data found in blob");
+
+      const total = oppData.active.length;
+      const batch = oppData.active.slice(offset, offset + CONVO_BATCH_SIZE);
+
       await writePipelineStatus({
         status: "running",
         step: "conversations",
         startedAt: new Date().toISOString(),
       });
 
-      const oppData = await readPipelineOpportunities();
-      if (!oppData) throw new Error("No opportunity data found in blob");
+      console.log(`[pipeline:conversations] Batch ${offset}–${offset + batch.length} of ${total}`);
+      const batchResults = await fetchAllConversations(batch);
 
-      console.log(`[pipeline:conversations] Fetching convos for ${oppData.active.length} contacts...`);
-      const conversations = await fetchAllConversations(oppData.active);
-      const withConvos = Object.values(conversations).filter(Boolean).length;
-      console.log(`[pipeline:conversations] ${withConvos}/${oppData.active.length} have conversations`);
+      // Merge with previous batches
+      const existing = offset > 0 ? (await readPipelineConversations()) || {} : {};
+      const merged = { ...existing, ...batchResults };
+      await writePipelineConversations(merged);
 
-      await writePipelineConversations(conversations);
-      chainNext(request, "enrich");
-      return NextResponse.json({ success: true, step: "conversations" });
+      const nextOffset = offset + CONVO_BATCH_SIZE;
+      if (nextOffset < total) {
+        // Chain next batch
+        chainNext(request, "conversations", { offset: String(nextOffset) });
+      } else {
+        // All done, chain enrich
+        const withConvos = Object.values(merged).filter(Boolean).length;
+        console.log(`[pipeline:conversations] Done: ${withConvos}/${total} have conversations`);
+        chainNext(request, "enrich");
+      }
+
+      return NextResponse.json({ success: true, step: "conversations", offset, batchSize: batch.length, total });
     } catch (error) {
       console.error("[pipeline:conversations]", error);
       await writePipelineStatus({
