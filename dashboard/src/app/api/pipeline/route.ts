@@ -18,10 +18,10 @@ import {
   writePipelineRecommendations,
 } from "@/lib/blob/store";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-const CONVO_BATCH_SIZE = 3;
-const RECOMMEND_BATCH_SIZE = 6;
+const CONVO_BATCH_SIZE = 5;
+const RECOMMEND_BATCH_SIZE = 8;
 
 // --- GET: status, conversations, enrich, recommend ---
 export async function GET(request: Request) {
