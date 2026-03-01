@@ -838,57 +838,49 @@ export default function Dashboard({ initialData }: { initialData: DashboardData 
     } catch { /* ignore */ }
   }, []);
 
-  const STEP_LABELS: Record<string, string> = {
-    opportunities: "Fetching pipeline...",
-    conversations: "Fetching conversations...",
-    enrich: "Enriching leads...",
-    recommend: "Generating recommendations...",
-  };
-
   async function handleRefresh() {
     setRefreshing(true);
-    setRefreshStep("Starting...");
     try {
-      const r = await fetch("/api/refresh", { method: "POST" });
-      if (!r.ok) {
-        setRefreshStep("Failed to start");
-        setRefreshing(false);
-        return;
+      // Step 1: Opportunities
+      setRefreshStep("Fetching pipeline...");
+      const oppResp = await fetch("/api/pipeline?step=opportunities", { method: "POST" });
+      const oppData = await oppResp.json();
+      if (!oppResp.ok) { setRefreshStep(`Error: ${oppData.error}`); setRefreshing(false); return; }
+
+      // Step 2: Conversations (batched)
+      let offset = 0;
+      let convoDone = false;
+      let convoTotal = oppData.activeLeads || 0;
+      while (!convoDone) {
+        setRefreshStep(`Fetching conversations... (${offset}/${convoTotal})`);
+        const convoResp = await fetch(`/api/pipeline?step=conversations&offset=${offset}`);
+        const convoData = await convoResp.json();
+        if (!convoResp.ok) { setRefreshStep(`Error: ${convoData.error}`); setRefreshing(false); return; }
+        convoTotal = convoData.total;
+        convoDone = convoData.done;
+        offset = convoData.nextOffset ?? offset;
       }
 
-      // Poll pipeline status every 2s
-      const poll = async (): Promise<boolean> => {
-        try {
-          const resp = await fetch("/api/pipeline?step=status");
-          const status = await resp.json();
-          if (status.status === "complete") {
-            setRefreshStep("Loading dashboard...");
-            const actionsResp = await fetch("/api/actions");
-            const newData = await actionsResp.json();
-            setData(newData);
-            setSentStatus({});
-            setDismissed(new Set());
-            return true;
-          }
-          if (status.status === "error") {
-            setRefreshStep(`Error: ${status.error || "unknown"}`);
-            return true;
-          }
-          setRefreshStep(STEP_LABELS[status.step] || status.step || "Running...");
-          return false;
-        } catch {
-          return false;
-        }
-      };
+      // Step 3: Enrich
+      setRefreshStep("Enriching leads...");
+      const enrichResp = await fetch("/api/pipeline?step=enrich");
+      if (!enrichResp.ok) { const d = await enrichResp.json(); setRefreshStep(`Error: ${d.error}`); setRefreshing(false); return; }
 
-      // Poll until complete or error (max 120s)
-      const maxAttempts = 60;
-      for (let i = 0; i < maxAttempts; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const done = await poll();
-        if (done) break;
-      }
-    } catch { /* ignore */ }
+      // Step 4: Recommend
+      setRefreshStep("Generating recommendations...");
+      const recResp = await fetch("/api/pipeline?step=recommend");
+      if (!recResp.ok) { const d = await recResp.json(); setRefreshStep(`Error: ${d.error}`); setRefreshing(false); return; }
+
+      // Done — reload dashboard data
+      setRefreshStep("Loading dashboard...");
+      const actionsResp = await fetch("/api/actions");
+      const newData = await actionsResp.json();
+      setData(newData);
+      setSentStatus({});
+      setDismissed(new Set());
+    } catch (err) {
+      setRefreshStep(`Error: ${err}`);
+    }
     setRefreshing(false);
     setRefreshStep("");
   }

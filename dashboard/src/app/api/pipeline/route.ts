@@ -15,21 +15,11 @@ import {
   writePipelineEnriched,
   readPipelineEnriched,
 } from "@/lib/blob/store";
+import type { ParsedLead } from "@/lib/ghl/types";
 
 export const maxDuration = 60;
 
-const CONVO_BATCH_SIZE = 5;
-
-function chainNext(request: Request, step: string, extraParams?: Record<string, string>) {
-  const url = new URL(request.url);
-  url.searchParams.set("step", step);
-  if (extraParams) {
-    for (const [k, v] of Object.entries(extraParams)) {
-      url.searchParams.set(k, v);
-    }
-  }
-  fetch(url.toString(), { signal: AbortSignal.timeout(500) }).catch(() => {});
-}
+const CONVO_BATCH_SIZE = 3;
 
 // --- GET: status, conversations, enrich, recommend ---
 export async function GET(request: Request) {
@@ -65,17 +55,21 @@ export async function GET(request: Request) {
       await writePipelineConversations(merged);
 
       const nextOffset = offset + CONVO_BATCH_SIZE;
-      if (nextOffset < total) {
-        // Chain next batch
-        chainNext(request, "conversations", { offset: String(nextOffset) });
-      } else {
-        // All done, chain enrich
+      const done = nextOffset >= total;
+      if (done) {
         const withConvos = Object.values(merged).filter(Boolean).length;
         console.log(`[pipeline:conversations] Done: ${withConvos}/${total} have conversations`);
-        chainNext(request, "enrich");
       }
 
-      return NextResponse.json({ success: true, step: "conversations", offset, batchSize: batch.length, total });
+      return NextResponse.json({
+        success: true,
+        step: "conversations",
+        offset,
+        batchSize: batch.length,
+        total,
+        done,
+        nextOffset: done ? null : nextOffset,
+      });
     } catch (error) {
       console.error("[pipeline:conversations]", error);
       await writePipelineStatus({
@@ -104,7 +98,6 @@ export async function GET(request: Request) {
       const enriched = enrichLeads(oppData.active, convos);
 
       await writePipelineEnriched(enriched);
-      chainNext(request, "recommend");
       return NextResponse.json({ success: true, step: "enrich" });
     } catch (error) {
       console.error("[pipeline:enrich]", error);
@@ -183,7 +176,6 @@ export async function POST(request: Request) {
       console.log(`[pipeline:opportunities] Found ${active.length} active leads`);
 
       await writePipelineOpportunities({ active, inactiveSummary });
-      chainNext(request, "conversations");
       return NextResponse.json({ success: true, step: "opportunities", activeLeads: active.length });
     } catch (error) {
       console.error("[pipeline:opportunities]", error);
