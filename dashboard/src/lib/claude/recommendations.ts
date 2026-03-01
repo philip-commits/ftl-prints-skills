@@ -92,7 +92,7 @@ Inactive summary: ${JSON.stringify(inactiveSummary)}
 Leads:
 ${JSON.stringify(leadsData, null, 2)}
 
-Return valid JSON with "actions" and "noAction" arrays. Action IDs must be sequential starting at 1. Include conversationHistory and notes arrays from the input data in each action.`,
+Return valid JSON with "actions" and "noAction" arrays. Action IDs must be sequential starting at 1. Do NOT include conversationHistory or notes in the output — they will be attached automatically.`,
       },
     ],
   });
